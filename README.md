@@ -1,6 +1,6 @@
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K3K314GUP)
 
-# Download
+# Download prebuild executable
 [Download v0.0.3](https://github.com/Crypto90/WindowManager/releases/download/0.0.3/Crypto90s_WindowManager.exe)
 
 # WindowManager
