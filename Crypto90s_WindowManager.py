@@ -307,7 +307,7 @@ class WindowManagerApp:
 
 def main():
     root = tk.Tk()
-    root.geometry("400x400")
+    root.geometry("600x500")
     app = WindowManagerApp(root)
     root.mainloop()
 
