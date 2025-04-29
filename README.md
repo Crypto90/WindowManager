@@ -8,9 +8,13 @@ A desktop app built with tkinter that lets users manage window positions and sta
 
 # Requires
 pip install psutil
+
 pip install pygetwindow
+
 pip install screeninfo
+
 pip install pywin32
+
 pip install win32gui
 
 # Build executable
