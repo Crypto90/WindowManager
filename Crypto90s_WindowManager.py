@@ -255,7 +255,7 @@ class WindowManagerApp:
         
         # Adding copyright and thanks message to the log output
         self.log(f"------------------------------------------------")
-        self.log(f"Crypto's WindowManager {current_version} © Crypto90. All rights reserved.")
+        self.log(f"Crypto90's WindowManager {current_version}. All rights reserved.")
         self.log(f"Thanks for using! Find the source code here:\nhttps://github.com/Crypto90/WindowManager")
         self.log(f"------------------------------------------------")
 
