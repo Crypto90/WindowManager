@@ -55,15 +55,15 @@ Manage up to 10 seperate presets for your all your different workspace needs.
 If enabled, the program automatically closes itself after start and order action finishes.
 
 # Requires
+```
 pip install psutil
-
 pip install pygetwindow
-
 pip install screeninfo
-
 pip install pywin32
-
 pip install win32gui
+```
 
 # Build executable
+```
 pyinstaller --onefile --noconsole Crypto90s_WindowManager.py
+```
