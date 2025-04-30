@@ -12,12 +12,19 @@ import win32gui
 import win32con
 import webbrowser
 import pygetwindow as gw
-
+import sys
+import argparse
 
 import ctypes
 from ctypes import wintypes
 
 current_version = "v0.0.6"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Crypto90's WindowManager Preset Selector")
+    parser.add_argument("--preset", type=int, default=1, help="Preset number to load (default: 1)")
+    return parser.parse_args()
 
 # Class for window state
 class WindowState:
@@ -30,16 +37,30 @@ class WindowState:
         self.path = path
 
 # Load/save state
-def load_window_states(filename="window_states.pkl"):
+def load_window_states(filename="window_states_1.pkl"):
+    # Load the window states from the preset-specific file
+    #print(f"Loading {filename}")
     try:
         with open(filename, "rb") as f:
-            return pickle.load(f)
+            data = pickle.load(f)
+            #print(data)
+            # Assuming the new format is a dictionary with 'window_states' and 'config'
+            if isinstance(data, dict):
+                window_states = data.get("window_states", {})
+                config = data.get("config", {})
+                return window_states, config
     except (FileNotFoundError, EOFError):
-        return {}
+        return {}, {}  # Return empty states and config on failure
 
-def save_window_states(window_states, filename="window_states.pkl"):
+
+def save_window_states(window_states, config=None, filename="window_states_1.pkl"):
+    data = {
+        "window_states": window_states,
+        "config": config or {}
+    }
     with open(filename, "wb") as f:
-        pickle.dump(window_states, f)
+        pickle.dump(data, f)
+
 
 def get_monitor_for_window(win, monitors):
     wx, wy = win.left + win.width // 2, win.top + win.height // 2
@@ -173,11 +194,26 @@ class WindowManagerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Crypto90's WindowManager")
-        self.window_states = load_window_states()
+        
+        args = parse_args()
+        preset_number = args.preset
+        filename = f"window_states_{preset_number}.pkl"
+        
+        self.window_states, self.config = load_window_states(filename)
         self.window_mapping = []
+        
+        
+        if "auto_close" in self.config:
+            self.auto_close_var = tk.BooleanVar(value=self.config.get("auto_close"))
+        else:
+            self.auto_close_var = tk.BooleanVar(value=False)
+        # Load auto-close state if it exists
+        
+        
         
         # Set minimum width and height for the main window
         self.root.minsize(width=400, height=400)
+        
         
         
        
@@ -212,7 +248,32 @@ class WindowManagerApp:
 
         self.process_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.process_listbox_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        
+        
+        # Preset Management Frame
+        preset_frame = tk.Frame(self.root, bg="#1e1e1e")
+        preset_frame.pack(pady=5)
 
+        self.current_preset = tk.StringVar(value="Preset 1")
+
+        tk.Label(preset_frame, text="Presets:", fg="white", bg="#1e1e1e").pack(side="left")
+        for i in range(1, 11):
+            name = f"Preset {i}"
+            cb = tk.Radiobutton(
+                preset_frame, text=str(i), variable=self.current_preset, value=name,
+                command=self.switch_preset, bg="#1e1e1e", fg="white", selectcolor="#2e2e2e"
+            )
+            cb.pack(side="left", padx=2)
+        
+        # Auto-close checkbox
+        self.auto_close_var = tk.BooleanVar()
+        self.auto_close_checkbox = tk.Checkbutton(
+            self.root, text="Auto-close after order", variable=self.auto_close_var,
+            bg="#1e1e1e", fg="white", selectcolor="#2e2e2e"
+        )
+        self.auto_close_checkbox.pack()
+        
         # Button frame
         button_frame = tk.Frame(self.root, bg="#1e1e1e")
         button_frame.pack(pady=10)
@@ -248,9 +309,12 @@ class WindowManagerApp:
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.log_text_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
+        # update current ui preset option checked
+        self.current_preset.set(f"Preset {preset_number}")
         
-        
-        
+        # update current ui checkbox for auto close
+        if "auto_close" in self.config:
+            self.auto_close_var.set(self.config.get("auto_close"))
         
         
         # Adding copyright and thanks message to the log output
@@ -258,7 +322,8 @@ class WindowManagerApp:
         self.log(f"Crypto90's WindowManager {current_version}. All rights reserved.")
         self.log(f"Thanks for using! Find the source code here:\nhttps://github.com/Crypto90/WindowManager")
         self.log(f"------------------------------------------------")
-
+        self.log(f"Loaded preset number: {preset_number}")
+        
         self.populate_window_list()
         
         self.stream_order()
@@ -267,7 +332,24 @@ class WindowManagerApp:
         # If window states are loaded, restore main window's position and size
         if self.window_states:
             self.restore_main_window_position()
+    
+    
+    def switch_preset(self):
+        selected = self.current_preset.get()
+        # Determine the file corresponding to the current preset
+        preset_file = f"window_states_{selected.split()[-1]}.pkl"
+        
+        self.window_states, self.config = load_window_states(preset_file)
+        
+        if "auto_close" in self.config:
+            self.auto_close_var.set(self.config.get("auto_close"))
+        else:
+            self.auto_close_var.set(False)
+        
+        self.refresh_window_list()
+        self.log(f"Switched to {selected}")
 
+    
     def log(self, message):
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, message + "\n")
@@ -280,7 +362,6 @@ class WindowManagerApp:
         self.populate_window_list()
 
     def populate_window_list(self):
-        
         current_names = {get_process_name_for_window(w) for w in gw.getAllWindows()}
         for pname, state in self.window_states.items():
             if pname == "main_window":
@@ -331,69 +412,41 @@ class WindowManagerApp:
         
 
 
-
     def save_window_positions(self):
         selected_indices = self.process_listbox.curselection()
-        new_states = {}
+        self.window_states = {}
+        
+        selected = self.current_preset.get()
+        preset_file = f"window_states_{selected.split()[-1]}.pkl"
 
-        for idx in selected_indices:
-            item = self.window_mapping[idx]
-            if item:
-                win, pname = item
-                try:
-                    _, pid = win32process.GetWindowThreadProcessId(win._hWnd)
-                    process = psutil.Process(pid)
-                    process_path = process.exe()
-                except Exception:
-                    process_path = None
+        for index in selected_indices:
+            win_entry = self.window_mapping[index]
 
-                # Capture additional information based on the process name
+            if win_entry is None:
+                continue  # Skip separators or non-window entries
+
+            window, process_name = win_entry
+
+            try:
+                position = (window.left, window.top)
+                size = (window.width, window.height)
+                path = get_process_path_for_window(window)
+                uwp = is_uwp_window(window)
                 url = None
-                path = None
-                if "chrome.exe" in pname.lower():
-                    # Try to capture the URL from Chrome
-                    # This assumes the browser has a specific way to get the URL via its window
-                    url = self.get_chrome_url(pname)  # You will need to define this method to retrieve the URL
-                elif "explorer.exe" in pname.lower():
-                    # Capture the current directory for Explorer
-                    path = self.get_explorer_path(pname)  # Define this method to capture Explorer's current path
+                if uwp:
+                    url = get_uwp_app_name(path)
+                self.window_states[process_name] = WindowState(process_name, position, size, path, url)
+                self.log(f"Saved: {process_name} at {position} size {size}")
+            except Exception as e:
+                self.log(f"Error saving {process_name}: {e}")
 
-                state = WindowState(pname, (win.left, win.top), (win.width, win.height), process_path, url, path)
-                new_states[pname] = state
-
-        # Always save the main window's position
-        main_window_position = self.root.winfo_x(), self.root.winfo_y()
-        main_window_size = self.root.winfo_width(), self.root.winfo_height()
-        new_states["main_window"] = WindowState("main_window", main_window_position, main_window_size)
-
-        # Filter out non-running processes except "main_window"
-        cleaned_states = {}
-        for pname, state in new_states.items():
-            if pname == "main_window" or is_process_running(state.process_path):
-                cleaned_states[pname] = state
-            else:
-                self.log(f"Removed non-running process from saved state: {pname}")
-
-        self.window_states = cleaned_states
-        save_window_states(self.window_states)
-        self.window_states = load_window_states()
+        # Save config state
+        config = {
+            "auto_close": self.auto_close_var.get()
+        }
+        save_window_states(self.window_states, config, preset_file)
+        self.log(f"Window positions saved for {selected}")
         self.refresh_window_list()
-        self.log("Window positions saved.")
-
-    def get_chrome_url(self, pname):
-        """Method to extract the URL from Chrome window."""
-        # Implement logic to retrieve the URL of the active Chrome tab (This may involve inspecting Chrome's internal state or using a Chrome extension API)
-        # For simplicity, let's return a dummy URL
-        return "https://www.example.com"  # Replace with actual method to extract Chrome URL
-
-
-    def get_explorer_path(self, pname):
-        """Method to extract the current path from Explorer."""
-        # For Windows Explorer, we could try to use the shell to get the active directory or window path.
-        # Below is just a placeholder example.
-        if pname.lower() == "explorer.exe":
-            return os.getcwd()  # Return the current working directory for simplicity
-        return None
     
     def restore_main_window_position(self):
         if "main_window" in self.window_states:
@@ -470,6 +523,12 @@ class WindowManagerApp:
                 self.log(f"Moved and resized window for {pname}")
             else:
                 self.log(f"Warning: Window for '{pname}' not found.")
+        
+        
+        if self.auto_close_var.get():
+            self.log("Auto-close is enabled. Exiting in 5 seconds...")
+            self.root.after(5000, self.root.destroy)
+
 
 
 
