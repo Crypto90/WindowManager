@@ -46,7 +46,13 @@ Allows users to save window positions and restore them later, ensuring a consist
 
 Lets users reorder, move, and resize application windows directly through the app interface.
 
+#### Preset Management:
 
+Manage up to 10 seperate presets for your all your different workspace needs.
+
+#### Auto Close Program:
+
+If enabled, the program automatically closes itself after start and order action finishes.
 
 # Requires
 pip install psutil
