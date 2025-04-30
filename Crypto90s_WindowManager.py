@@ -17,7 +17,7 @@ import pygetwindow as gw
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.0.5"
+current_version = "v0.0.6"
 
 # Class for window state
 class WindowState:
@@ -180,42 +180,79 @@ class WindowManagerApp:
         self.root.minsize(width=400, height=400)
         
         
+       
+
+        # dark mode
+        
+        
+        # Set dark background for the main window
+        self.root.configure(bg="#1e1e1e")
+
         # Process listbox with scrollbar
-        self.process_listbox_frame = tk.Frame(self.root)
+        self.process_listbox_frame = tk.Frame(self.root, bg="#1e1e1e")
         self.process_listbox_frame.pack(pady=10, fill=tk.BOTH, expand=True)
-        
-        self.process_listbox = tk.Listbox(self.process_listbox_frame, selectmode=tk.MULTIPLE)
-        self.process_listbox_scrollbar = tk.Scrollbar(self.process_listbox_frame, orient="vertical", command=self.process_listbox.yview)
-        
+
+        self.process_listbox = tk.Listbox(
+            self.process_listbox_frame,
+            selectmode=tk.MULTIPLE,
+            bg="#2e2e2e",
+            fg="white",
+            selectbackground="darkgreen",
+            highlightbackground="#444",
+            relief=tk.FLAT
+        )
+        self.process_listbox_scrollbar = tk.Scrollbar(
+            self.process_listbox_frame,
+            orient="vertical",
+            command=self.process_listbox.yview,
+            troughcolor="#2e2e2e",
+            bg="#555"
+        )
         self.process_listbox.config(yscrollcommand=self.process_listbox_scrollbar.set)
-        
+
         self.process_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.process_listbox_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Buttons
-        tk.Button(self.root, text="Refresh Process List", command=self.refresh_window_list).pack(pady=5)
-        tk.Button(self.root, text="Save", command=self.save_window_positions).pack(pady=5)
-        tk.Button(self.root, text="Order", command=self.stream_order).pack(pady=5)
-        tk.Button(self.root, text="Buy me a Coffee ☕", fg="white", bg="#29abe0", command=lambda: webbrowser.open("https://ko-fi.com/crypto90")).pack(pady=5)
+        # Button frame
+        button_frame = tk.Frame(self.root, bg="#1e1e1e")
+        button_frame.pack(pady=10)
 
+        tk.Button(button_frame, text="Refresh Process List", bg="#2980b9", fg="white", command=self.refresh_window_list).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Save Window Positions", bg="#7f8c8d", fg="white", command=self.save_window_positions).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Start and Order", bg="darkgreen", fg="white", command=self.stream_order).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Buy me a Coffee ☕", bg="#f39c12", fg="black", command=lambda: webbrowser.open("https://ko-fi.com/crypto90")).pack(side="left", padx=5)
 
-        # Log box with scrollbar and fixed height
-        self.log_text_frame = tk.Frame(self.root)
-        self.log_text_frame.pack(pady=10, fill=tk.X, expand=False, side=tk.BOTTOM)  # Ensure it's at the bottom
+        # Log box
+        self.log_text_frame = tk.Frame(self.root, bg="#1e1e1e")
+        self.log_text_frame.pack(pady=10, fill=tk.X, expand=False, side=tk.BOTTOM)
 
-        # Create the Text widget for the log box
-        self.log_text = tk.Text(self.log_text_frame, height=10, state=tk.DISABLED, bg="black", fg="white")
+        self.log_text = tk.Text(
+            self.log_text_frame,
+            height=10,
+            state=tk.DISABLED,
+            bg="#1e1e1e",
+            fg="#dcdcdc",
+            insertbackground="white",
+            highlightbackground="#444"
+        )
 
-        # Create the Scrollbar widget for the log box
-        self.log_text_scrollbar = tk.Scrollbar(self.log_text_frame, orient="vertical", command=self.log_text.yview)
+        self.log_text_scrollbar = tk.Scrollbar(
+            self.log_text_frame,
+            orient="vertical",
+            command=self.log_text.yview,
+            troughcolor="#2e2e2e",
+            bg="#555"
+        )
         self.log_text.config(yscrollcommand=self.log_text_scrollbar.set)
 
-        # Pack the Text widget to expand horizontally (fill X) but keep the fixed height
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # Pack the Scrollbar widget to the right side with vertical filling (fill Y)
         self.log_text_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
+        
+        
+        
+        
+        
+        
         # Adding copyright and thanks message to the log output
         self.log(f"------------------------------------------------")
         self.log(f"Crypto's WindowManager {current_version} © Crypto90. All rights reserved.")
@@ -258,7 +295,7 @@ class WindowManagerApp:
         grouped = get_visible_windows_grouped_by_monitor()
         for monitor, items in grouped.items():
             self.process_listbox.insert(tk.END, f"=== Monitor: {monitor} ===")
-            self.process_listbox.itemconfig(tk.END, {'fg': 'blue'})
+            self.process_listbox.itemconfig(tk.END, {'fg': '#2980b9'})
             self.window_mapping.append(None)
             for win, pname in items:
                 saved = pname in self.window_states
@@ -366,6 +403,10 @@ class WindowManagerApp:
 
 
     def stream_order(self):
+        
+        # always refresh process list before we order
+        self.refresh_window_list()
+        
         started_any = False
 
         for pname, state in self.window_states.items():
@@ -429,14 +470,6 @@ class WindowManagerApp:
                 self.log(f"Moved and resized window for {pname}")
             else:
                 self.log(f"Warning: Window for '{pname}' not found.")
-                # Start the process if the window is not found
-                if state.process_path:
-                    try:
-                        subprocess.Popen(state.process_path)
-                        self.log(f"Started: {state.process_path}")
-                    except Exception as e:
-                        self.log(f"Error: Failed to start '{pname}': {e}")
-                messagebox.showwarning("Warning", f"Window for '{pname}' not found. Starting process.")
 
 
 
