@@ -17,7 +17,7 @@ import pygetwindow as gw
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.0.4"
+current_version = "v0.0.5"
 
 # Class for window state
 class WindowState:
@@ -223,6 +223,9 @@ class WindowManagerApp:
         self.log(f"------------------------------------------------")
 
         self.populate_window_list()
+        
+        self.stream_order()
+        
 
         # If window states are loaded, restore main window's position and size
         if self.window_states:
