@@ -17,6 +17,8 @@ import pygetwindow as gw
 import ctypes
 from ctypes import wintypes
 
+current_version = "v0.0.4"
+
 # Class for window state
 class WindowState:
     def __init__(self, process_name, position, size, process_path=None, url=None, path=None):
@@ -216,7 +218,7 @@ class WindowManagerApp:
 
         # Adding copyright and thanks message to the log output
         self.log(f"------------------------------------------------")
-        self.log(f"Crypto's WindowManager © Crypto90. All rights reserved.")
+        self.log(f"Crypto's WindowManager {current_version} © Crypto90. All rights reserved.")
         self.log(f"Thanks for using! Find the source code here:\nhttps://github.com/Crypto90/WindowManager")
         self.log(f"------------------------------------------------")
 
