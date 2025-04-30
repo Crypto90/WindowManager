@@ -4,10 +4,10 @@
 This is a simple desktop application built using tkinter that allows users to manage the positions and states of application windows on their system. The program uses psutil, pygetwindow, and win32gui libraries to interact with the system's windows, allowing you to save and restore the positions of running applications across different monitors. Additionally, it ensures that not running processes get started automatically.
 
 # Download prebuild executable:
-[Download v0.0.6](https://github.com/Crypto90/WindowManager/releases/download/0.0.6/Crypto90s_WindowManager.exe)
+[Download v0.0.7](https://github.com/Crypto90/WindowManager/releases/download/0.0.7/Crypto90s_WindowManager.exe)
 
 # Screenshot:
-![til](./preview_dark.png)
+![til](./preview.png)
 
 # Features:
 
