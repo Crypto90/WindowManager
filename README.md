@@ -1,7 +1,7 @@
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K3K314GUP)
 
 # Download prebuild executable
-[Download v0.0.3](https://github.com/Crypto90/WindowManager/releases/download/0.0.3/Crypto90s_WindowManager.exe)
+[Download v0.0.4](https://github.com/Crypto90/WindowManager/releases/download/0.0.4/Crypto90s_WindowManager.exe)
 
 # WindowManager
 This is a simple desktop application built using tkinter that allows users to manage the positions and states of application windows on their system. The program uses psutil, pygetwindow, and win32gui libraries to interact with the system's windows, allowing you to save and restore the positions of running applications across different monitors. Additionally, it ensures that not running processes get started automatically.
