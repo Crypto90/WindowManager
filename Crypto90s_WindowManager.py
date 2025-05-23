@@ -28,13 +28,14 @@ def parse_args():
 
 # Class for window state
 class WindowState:
-    def __init__(self, process_name, position, size, process_path=None, url=None, path=None):
+    def __init__(self, process_name, position, size, process_path=None, url=None, path=None, minimized=False):
         self.process_name = process_name
         self.position = position
         self.size = size
         self.process_path = process_path
         self.url = url
         self.path = path
+        self.minimized = minimized
 
 # Load/save state
 def load_window_states(filename="window_states_1.pkl"):
@@ -63,11 +64,28 @@ def save_window_states(window_states, config=None, filename="window_states_1.pkl
 
 
 def get_monitor_for_window(win, monitors):
-    wx, wy = win.left + win.width // 2, win.top + win.height // 2
-    for monitor in monitors:
-        if monitor.x <= wx <= monitor.x + monitor.width and monitor.y <= wy <= monitor.y + monitor.height:
-            return monitor
+    hwnd = win._hWnd
+    try:
+        # Use normal (restored) position if minimized
+        if win32gui.IsIconic(hwnd):
+            placement = win32gui.GetWindowPlacement(hwnd)
+            # placement[4] is the normal (restored) position: (left, top, right, bottom)
+            normal_pos = placement[4]
+            wx = (normal_pos[0] + normal_pos[2]) // 2
+            wy = (normal_pos[1] + normal_pos[3]) // 2
+        else:
+            wx = win.left + win.width // 2
+            wy = win.top + win.height // 2
+
+        for monitor in monitors:
+            if monitor.x <= wx <= monitor.x + monitor.width and monitor.y <= wy <= monitor.y + monitor.height:
+                return monitor
+
+    except Exception as e:
+        print(f"Error determining monitor for window '{win.title}': {e}")
+
     return None
+
 
 def get_process_name_for_window(win):
     try:
@@ -97,22 +115,34 @@ def get_visible_windows_grouped_by_monitor():
     monitors = get_monitors()
     for window in gw.getAllWindows():
         hWnd = window._hWnd
-        if not win32gui.IsWindowVisible(hWnd) or not win32gui.IsWindowEnabled(hWnd):
+        
+        process_name = get_process_name_for_window(window)
+        if not process_name or process_name == "explorer.exe":
             continue
+        if not win32gui.IsWindowEnabled(hWnd):
+            continue
+
+        # Include windows that are either visible or minimized
+        if not (win32gui.IsWindowVisible(hWnd) or win32gui.IsIconic(hWnd)):
+            continue
+
         if win32gui.GetWindow(hWnd, win32con.GW_OWNER):
             continue
+
         if win32gui.GetWindowTextLength(hWnd) == 0:
             continue
-        process_name = get_process_name_for_window(window)
-        if not process_name:
-            continue
+
+        
+
         monitor = get_monitor_for_window(window, monitors)
         if monitor:
             mon_id = f"{monitor.x}x{monitor.y} {monitor.width}x{monitor.height}"
             if mon_id not in grouped:
                 grouped[mon_id] = []
             grouped[mon_id].append((window, process_name))
+
     return grouped
+
 
 def get_process_path_from_hwnd(hwnd):
     """Get process executable path from window handle."""
@@ -201,6 +231,8 @@ class WindowManagerApp:
         
         self.window_states, self.config = load_window_states(filename)
         self.window_mapping = []
+        
+        
         
         
         if "auto_close" in self.config:
@@ -334,6 +366,106 @@ class WindowManagerApp:
             self.restore_main_window_position()
     
     
+    def launch_independent(self, path):
+        DETACHED_PROCESS = 0x00000008  # Windows-only flag
+        try:
+            subprocess.Popen(
+                path,
+                cwd=os.path.dirname(path),
+                creationflags=DETACHED_PROCESS if sys.platform == "win32" else 0,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
+            )
+        except Exception as e:
+            print(f"Error launching: {e}")
+    
+    def try_start_application(self, pname, state, window_states, save_path, auto_close_flag=False, UWP=False):
+        
+        if os.path.isfile(state.process_path):
+            # Check if the app is a UWP app by looking for "WindowsApps" in the path
+            if "WindowsApps" in state.process_path:
+                # Handle UWP app start using AppUserModelId or AppExecutionAlias
+                self.log(f"Starting UWP app: {pname}")
+
+                # Extract the app name from the path and remove the ".exe" extension if present
+                app_name = state.process_path.split("\\")[-2]  # Extract the last part (the app name)
+                #app_name_without_extension = app_name.replace(".exe", "")  # Remove .exe extension
+                # Get the AppUserModelId using PowerShell
+                uwp_app_name = get_uwp_app_name(app_name)
+                
+                #print("uwp app name:")
+                #print(uwp_app_name)
+
+                if uwp_app_name:
+                    # Start the UWP app using the AppUserModelId
+                    uwp_start_command = f"cmd /c start {uwp_app_name}"
+                    #print(uwp_start_command)
+                    subprocess.Popen(uwp_start_command, shell=True)
+                    
+                    #self.launch_independent(uwp_start_command)
+                    #self.log(f"Started UWP app: {uwp_app_name}")
+                else:
+                    self.log(f"Failed to find AppUserModelId for {pname}")
+            else:
+                self.launch_independent(state.process_path)
+            return
+
+        # Try to find the new path one level up
+        base_dir = os.path.dirname(state.process_path)
+        filename = os.path.basename(state.process_path)
+        parent_dir = os.path.dirname(base_dir)
+
+        for root, dirs, files in os.walk(parent_dir):
+            if filename in files:
+                new_path = os.path.join(root, filename)
+                print(f"App update with changed path detected: {new_path}")
+
+                # Update paths in memory
+                updated = False
+                for state in window_states.values():
+                    if state.process_path == app_path:
+                        state.process_path = new_path
+                        updated = True
+
+                if updated:
+                    config = {"auto_close": auto_close_flag}
+                    save_window_states(window_states, config, filename=save_path)
+                    print(f"Updated path saved to: {save_path}")
+
+                
+                if os.path.isfile(new_path):
+                    # Check if the app is a UWP app by looking for "WindowsApps" in the path
+                    if "WindowsApps" in new_path:
+                        # Handle UWP app start using AppUserModelId or AppExecutionAlias
+                        self.log(f"Starting UWP app: {pname}")
+
+                        # Extract the app name from the path and remove the ".exe" extension if present
+                        app_name = new_path.split("\\")[-2]  # Extract the last part (the app name)
+                        #app_name_without_extension = app_name.replace(".exe", "")  # Remove .exe extension
+                        # Get the AppUserModelId using PowerShell
+                        uwp_app_name = get_uwp_app_name(app_name)
+                        
+                        #print("uwp app name:")
+                        #print(uwp_app_name)
+
+                        if uwp_app_name:
+                            # Start the UWP app using the AppUserModelId
+                            uwp_start_command = f"cmd /c start {uwp_app_name}"
+                            #print(uwp_start_command)
+                            subprocess.Popen(uwp_start_command, shell=True)
+                            
+                            #self.launch_independent(uwp_start_command)
+                            #self.log(f"Started UWP app: {uwp_app_name}")
+                        else:
+                            self.log(f"Failed to find AppUserModelId for {pname}")
+                    else:
+                        self.launch_independent(new_path)
+                    return
+                return
+
+        print(f"Error: Failed to find or start '{filename}' (original path: {app_path})")
+    
     def switch_preset(self):
         selected = self.current_preset.get()
         # Determine the file corresponding to the current preset
@@ -385,14 +517,32 @@ class WindowManagerApp:
                     window = gw.getWindowsWithTitle(win.title)[0]  # Get window with title
                     width = window.width
                     height = window.height
-                    left = window.left
-                    top = window.top
+                    
+                    hwnd = window._hWnd
+                    placement = win32gui.GetWindowPlacement(hwnd)
+                    hwnd_minimized = placement[1] == win32con.SW_SHOWMINIMIZED
 
-                    # Only show windows that aren't 0x0
-                    if width > 0 and height > 0:
+                    if hwnd_minimized:
+                        # Get restored position (normal state) from placement
+                        restored_rect = placement[4]  # (left, top, right, bottom)
+                        left = restored_rect[0]
+                        top = restored_rect[1]
+                        width = restored_rect[2] - restored_rect[0]
+                        height = restored_rect[3] - restored_rect[1]
+                    else:
+                        left = window.left
+                        top = window.top
+                        width = window.width
+                        height = window.height
+                    
+                    #hwnd = window._hWnd
+                    #hwnd_minimized = win32gui.IsIconic(hwnd)
+
+                    # Only skip if not minimized and size is 0x0
+                    if (width > 0 and height > 0) or hwnd_minimized:
                         is_uwp = is_uwp_window(win)
                         uwp_tag = " [UWP]" if is_uwp else ""
-                        label = f"{star}{pname} (Title: {win.title[:30]}, Size: {width}x{height}, Position: {left},{top}){uwp_tag}"
+                        label = f"{star}{pname} (Title: {win.title[:30]}, Size: {width}x{height}, Position: {left},{top}){uwp_tag}, Minimized: {hwnd_minimized}"
                     else:
                         continue  # Skip windows with size 0x0
 
@@ -426,17 +576,40 @@ class WindowManagerApp:
                 continue  # Skip separators or non-window entries
 
             window, process_name = win_entry
-
+            
+            
+            
             try:
-                position = (window.left, window.top)
-                size = (window.width, window.height)
+                hwnd = window._hWnd
+                hwnd_minimized = win32gui.IsIconic(hwnd)
+                
+                placement = win32gui.GetWindowPlacement(hwnd)
+                hwnd_minimized = placement[1] == win32con.SW_SHOWMINIMIZED
+
+                if hwnd_minimized:
+                    restored_rect = placement[4]  # (left, top, right, bottom)
+                    left = restored_rect[0]
+                    top = restored_rect[1]
+                    width = restored_rect[2] - restored_rect[0]
+                    height = restored_rect[3] - restored_rect[1]
+                else:
+                    left = window.left
+                    top = window.top
+                    width = window.width
+                    height = window.height
+
+                position = (left, top)
+                size = (width, height)
+
+                
                 path = get_process_path_for_window(window)
                 uwp = is_uwp_window(window)
                 url = None
+                is_minimized = hwnd_minimized
                 if uwp:
                     url = get_uwp_app_name(path)
-                self.window_states[process_name] = WindowState(process_name, position, size, path, url)
-                self.log(f"Saved: {process_name} at {position} size {size}")
+                self.window_states[process_name] = WindowState(process_name, position, size, path, url, minimized=is_minimized)
+                self.log(f"Saved: {process_name} at {position} size {size}. Minimized: {is_minimized}")
             except Exception as e:
                 self.log(f"Error saving {process_name}: {e}")
 
@@ -461,69 +634,52 @@ class WindowManagerApp:
         self.refresh_window_list()
         
         started_any = False
+        
+        
+        
+        selected = self.current_preset.get()
+        preset_file = f"window_states_{selected.split()[-1]}.pkl"
 
         for pname, state in self.window_states.items():
             if not hasattr(state, "process_path") or state.process_path is None:
                 continue  # Skip entries like "main_window" or invalid ones
-            #print(state.process_path)
             running = is_process_running(state.process_path)
             if not running and state.process_path:
                 try:
-                    # Check if the app is a UWP app by looking for "WindowsApps" in the path
-                    if "WindowsApps" in state.process_path:
-                        # Handle UWP app start using AppUserModelId or AppExecutionAlias
-                        self.log(f"Starting UWP app: {pname}")
-
-                        # Extract the app name from the path and remove the ".exe" extension if present
-                        app_name = state.process_path.split("\\")[-2]  # Extract the last part (the app name)
-                        #app_name_without_extension = app_name.replace(".exe", "")  # Remove .exe extension
-                        # Get the AppUserModelId using PowerShell
-                        uwp_app_name = get_uwp_app_name(app_name)
-                        
-                        #print("uwp app name:")
-                        #print(uwp_app_name)
-
-                        if uwp_app_name:
-                            # Start the UWP app using the AppUserModelId
-                            uwp_start_command = f"cmd /c start {uwp_app_name}"
-                            #print(uwp_start_command)
-                            subprocess.Popen(uwp_start_command, shell=True)
-                            #self.log(f"Started UWP app: {uwp_app_name}")
-                        else:
-                            self.log(f"Failed to find AppUserModelId for {pname}")
-
-                    else:
-                        # For Win32 apps, use Popen
-                        subprocess.Popen(state.process_path)
-                        self.log(f"Started Win32 app: {state.process_path}")
-
+                    self.try_start_application(pname, state, self.window_states, save_path=preset_file)
                     started_any = True
                 except Exception as e:
-                    messagebox.showerror("Error", f"Failed to start '{pname}': {e}")
-                    self.log(f"Error: Failed to start '{pname}': {e}")
+                    #messagebox.showerror("Error", f"Failed to start '{pname}' [{state.process_path}]: {e}")
+                    self.log(f"Error: Failed to start '{pname} [{state.process_path}]': {e}")
 
         if started_any:
             self.root.update()
             self.log("Waiting 5 seconds for windows to appear...")
             time.sleep(5)
-            # Refresh the process list after the wait
-            self.refresh_window_list()
+            
 
         for pname, state in self.window_states.items():
             if pname == "main_window":
                 continue  # Skip placeholder entries
             
-            windows = [w for w in gw.getAllWindows()
-                       if get_process_name_for_window(w) == pname and win32gui.IsWindowVisible(w._hWnd)]
+            windows = [w for w in gw.getAllWindows() if get_process_name_for_window(w) == pname and (win32gui.IsWindowVisible(w._hWnd) or win32gui.IsIconic(w._hWnd))]
             
             if windows:
                 win = windows[0]
+                hwnd = win._hWnd  # get the handle for win32gui call
                 win.moveTo(*state.position)
                 win.resizeTo(*state.size)
+                
+                # Minimize window if it was saved as minimized
+                if hasattr(state, 'minimized') and state.minimized:
+                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                
                 self.log(f"Moved and resized window for {pname}")
             else:
                 self.log(f"Warning: Window for '{pname}' not found.")
         
+        # Refresh the process list after the wait
+        self.refresh_window_list()
         
         if self.auto_close_var.get():
             self.log("Auto-close is enabled. Exiting in 5 seconds...")
