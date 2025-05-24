@@ -18,7 +18,7 @@ import argparse
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.0.8"
+current_version = "v0.1.0"
 
 
 def parse_args():
@@ -28,7 +28,7 @@ def parse_args():
 
 # Class for window state
 class WindowState:
-    def __init__(self, process_name, position, size, process_path=None, url=None, path=None, minimized=False):
+    def __init__(self, process_name, position, size, process_path=None, url=None, path=None, minimized=False, launcher_override=None):
         self.process_name = process_name
         self.position = position
         self.size = size
@@ -36,15 +36,14 @@ class WindowState:
         self.url = url
         self.path = path
         self.minimized = minimized
+        self.launcher_override = launcher_override
 
 # Load/save state
 def load_window_states(filename="window_states_1.pkl"):
     # Load the window states from the preset-specific file
-    #print(f"Loading {filename}")
     try:
         with open(filename, "rb") as f:
             data = pickle.load(f)
-            #print(data)
             # Assuming the new format is a dictionary with 'window_states' and 'config'
             if isinstance(data, dict):
                 window_states = data.get("window_states", {})
@@ -169,12 +168,11 @@ def get_uwp_app_name(package_family_name_substring):
     try:
         # Extract the identifier part from package_family_name_substring (after the last '__')
         identifier = package_family_name_substring.split('__')[-1]
-        #print(f"Searching for identifier: {identifier}")
         
         # Run PowerShell command to get all start apps with full AppIDs using Format-List
         process = subprocess.Popen(
             ["powershell", "-Command", "Get-StartApps | Format-List Name, AppID"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            stdout=subprocess.PIPE, stderr=subprocess.PIP, shell=False
         )
 
         stdout, stderr = process.communicate()
@@ -188,19 +186,15 @@ def get_uwp_app_name(package_family_name_substring):
         # Find the header line and parse the output
         name = None
         appid = None
-        #print("searching: " + identifier)
         for line in lines:
             if line.startswith("Name"):
                 name = line.split(":", 1)[1].strip()
-                #print(name)
             elif line.startswith("AppID"):
                 appid = line.split(":", 1)[1].strip()
-                #print("in: " + appid)
-                #print("-----")
                 if identifier.lower() in appid.lower():
                     return name  # or return (name, appid) if both are useful
 
-        return None  # no match found
+        return None
 
     except subprocess.CalledProcessError as e:
         print("Error running PowerShell:", e)
@@ -241,16 +235,8 @@ class WindowManagerApp:
             self.auto_close_var = tk.BooleanVar(value=False)
         # Load auto-close state if it exists
         
-        
-        
         # Set minimum width and height for the main window
         self.root.minsize(width=400, height=400)
-        
-        
-        
-       
-
-        # dark mode
         
         
         # Set dark background for the main window
@@ -281,8 +267,6 @@ class WindowManagerApp:
         self.process_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.process_listbox_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        
-        
         # Preset Management Frame
         preset_frame = tk.Frame(self.root, bg="#1e1e1e")
         preset_frame.pack(pady=5)
@@ -312,7 +296,7 @@ class WindowManagerApp:
 
         tk.Button(button_frame, text="Refresh Process List", bg="#2980b9", fg="white", command=self.refresh_window_list).pack(side="left", padx=5)
         tk.Button(button_frame, text="Save Window Positions", bg="#7f8c8d", fg="white", command=self.save_window_positions).pack(side="left", padx=5)
-        tk.Button(button_frame, text="Start and Order", bg="darkgreen", fg="white", command=self.stream_order).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Start, Resize and Order", bg="darkgreen", fg="white", command=self.stream_order).pack(side="left", padx=5)
         tk.Button(button_frame, text="Buy me a Coffee ☕", bg="#f39c12", fg="black", command=lambda: webbrowser.open("https://ko-fi.com/crypto90")).pack(side="left", padx=5)
 
         # Log box
@@ -364,56 +348,107 @@ class WindowManagerApp:
         # If window states are loaded, restore main window's position and size
         if self.window_states:
             self.restore_main_window_position()
+        
+        
+        
+        
+        self.process_listbox.bind("<Button-3>", self.show_context_menu)
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="Add Launcher Override", command=self.set_launcher_override)
+
+        
+    def show_context_menu(self, event):
+        try:
+            widget = event.widget
+            index = widget.nearest(event.y)
+            text = widget.get(index)
+
+            if text.startswith("★"):  # only allow context menu on starred entries
+                self.process_listbox.selection_clear(0, tk.END)
+                self.process_listbox.selection_set(index)
+                self.context_menu.post(event.x_root, event.y_root)
+        except Exception as e:
+            print("Error showing context menu:", e)
     
-    
+    def set_launcher_override(self):
+        from tkinter import filedialog
+
+        try:
+            selection = self.process_listbox.curselection()
+            if not selection:
+                return
+            index = selection[0]
+            text = self.process_listbox.get(index)
+            process_name = text.strip("★").split(" (")[0].strip()
+            file_path = filedialog.askopenfilename(
+                title="Select Launcher Executable",
+                filetypes=[("Executable Files", "*.exe"), ("All Files", "*.*")]
+            )
+            if not file_path:
+                return
+
+            # Apply override directly to stored window states
+            for key, state in self.window_states.items():
+                # Match based on process_name
+                if state.process_name == process_name:
+                    state.launcher_override = file_path
+                    self.log(f"Launcher override set for {key} -> {file_path}")
+                    break  # Remove if multiple entries may match
+
+            save_window_states(self.window_states, self.config)
+            self.refresh_window_list()
+
+        except Exception as e:
+            self.log(f"Error setting launcher override: {e}")
+
     def launch_independent(self, path):
-        DETACHED_PROCESS = 0x00000008  # Windows-only flag
+        CREATE_NEW_CONSOLE = 0x00000010  # Better than DETACHED_PROCESS for hiding console output
         try:
             subprocess.Popen(
-                path,
+                [path],
                 cwd=os.path.dirname(path),
-                creationflags=DETACHED_PROCESS if sys.platform == "win32" else 0,
+                creationflags=CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL
+                stdin=subprocess.DEVNULL,
+                shell=True
             )
         except Exception as e:
             print(f"Error launching: {e}")
     
     def try_start_application(self, pname, state, window_states, save_path, auto_close_flag=False, UWP=False):
         
-        if os.path.isfile(state.process_path):
+        launcher_path = state.launcher_override if state.launcher_override else state.process_path
+        if os.path.isfile(launcher_path):
             # Check if the app is a UWP app by looking for "WindowsApps" in the path
-            if "WindowsApps" in state.process_path:
+            if "WindowsApps" in launcher_path:
                 # Handle UWP app start using AppUserModelId or AppExecutionAlias
                 self.log(f"Starting UWP app: {pname}")
 
                 # Extract the app name from the path and remove the ".exe" extension if present
-                app_name = state.process_path.split("\\")[-2]  # Extract the last part (the app name)
+                app_name = launcher_path.split("\\")[-2]  # Extract the last part (the app name)
                 #app_name_without_extension = app_name.replace(".exe", "")  # Remove .exe extension
                 # Get the AppUserModelId using PowerShell
                 uwp_app_name = get_uwp_app_name(app_name)
                 
-                #print("uwp app name:")
-                #print(uwp_app_name)
-
                 if uwp_app_name:
                     # Start the UWP app using the AppUserModelId
                     uwp_start_command = f"cmd /c start {uwp_app_name}"
                     #print(uwp_start_command)
-                    subprocess.Popen(uwp_start_command, shell=True)
+                    subprocess.Popen(uwp_start_command, shell=False)
                     
                     #self.launch_independent(uwp_start_command)
-                    #self.log(f"Started UWP app: {uwp_app_name}")
+                    self.log(f"Started UWP app: {uwp_app_name}")
                 else:
                     self.log(f"Failed to find AppUserModelId for {pname}")
             else:
-                self.launch_independent(state.process_path)
+                self.launch_independent(launcher_path)
+                self.log(f"Started app: {launcher_path}")
             return
 
         # Try to find the new path one level up
-        base_dir = os.path.dirname(state.process_path)
-        filename = os.path.basename(state.process_path)
+        base_dir = os.path.dirname(launcher_path)
+        filename = os.path.basename(launcher_path)
         parent_dir = os.path.dirname(base_dir)
 
         for root, dirs, files in os.walk(parent_dir):
@@ -424,8 +459,8 @@ class WindowManagerApp:
                 # Update paths in memory
                 updated = False
                 for state in window_states.values():
-                    if state.process_path == app_path:
-                        state.process_path = new_path
+                    if launcher_path == app_path:
+                        launcher_path = new_path
                         updated = True
 
                 if updated:
@@ -456,11 +491,12 @@ class WindowManagerApp:
                             subprocess.Popen(uwp_start_command, shell=True)
                             
                             #self.launch_independent(uwp_start_command)
-                            #self.log(f"Started UWP app: {uwp_app_name}")
+                            self.log(f"Started UWP app: {uwp_app_name}")
                         else:
                             self.log(f"Failed to find AppUserModelId for {pname}")
                     else:
                         self.launch_independent(new_path)
+                        self.log(f"Started app: {launcher_path}")
                     return
                 return
 
@@ -499,7 +535,10 @@ class WindowManagerApp:
             if pname == "main_window":
                 continue  # Skip adding the main window
             if pname not in current_names:
-                label = f"★ {pname} (Not running)"
+                if state.launcher_override:
+                    label = f"★★ {pname} (Not running)"
+                else:
+                    label = f"★ {pname} (Not running)"
                 self.process_listbox.insert(tk.END, label)
                 index = self.process_listbox.size() - 1
                 self.process_listbox.itemconfig(index, {'fg': 'red'})
@@ -513,6 +552,13 @@ class WindowManagerApp:
             for win, pname in items:
                 saved = pname in self.window_states
                 star = "★ " if saved else "  "
+                
+                saved_override = (
+                    pname in self.window_states and
+                    self.window_states[pname].launcher_override is not None
+                )
+                star = "★★ " if saved_override else star
+                
                 try:
                     window = gw.getWindowsWithTitle(win.title)[0]  # Get window with title
                     width = window.width
@@ -535,9 +581,6 @@ class WindowManagerApp:
                         width = window.width
                         height = window.height
                     
-                    #hwnd = window._hWnd
-                    #hwnd_minimized = win32gui.IsIconic(hwnd)
-
                     # Only skip if not minimized and size is 0x0
                     if (width > 0 and height > 0) or hwnd_minimized:
                         is_uwp = is_uwp_window(win)
@@ -568,6 +611,10 @@ class WindowManagerApp:
         
         selected = self.current_preset.get()
         preset_file = f"window_states_{selected.split()[-1]}.pkl"
+        
+        
+        # Load existing states to preserve launcher_override and other data
+        previous_states, _ = load_window_states(preset_file)
 
         for index in selected_indices:
             win_entry = self.window_mapping[index]
@@ -606,9 +653,17 @@ class WindowManagerApp:
                 uwp = is_uwp_window(window)
                 url = None
                 is_minimized = hwnd_minimized
+                launcher_override_restore = None
+                
+                # Preserve launcher_override if it was previously set
+                old_state = previous_states.get(process_name)
+                if old_state and hasattr(old_state, "launcher_override"):
+                    launcher_override_restore = old_state.launcher_override
+                
+                
                 if uwp:
                     url = get_uwp_app_name(path)
-                self.window_states[process_name] = WindowState(process_name, position, size, path, url, minimized=is_minimized)
+                self.window_states[process_name] = WindowState(process_name, position, size, path, url, minimized=is_minimized, launcher_override=launcher_override_restore)
                 self.log(f"Saved: {process_name} at {position} size {size}. Minimized: {is_minimized}")
             except Exception as e:
                 self.log(f"Error saving {process_name}: {e}")
@@ -635,6 +690,7 @@ class WindowManagerApp:
         
         started_any = False
         
+        moved_resized_any = False
         
         
         selected = self.current_preset.get()
@@ -649,34 +705,55 @@ class WindowManagerApp:
                     self.try_start_application(pname, state, self.window_states, save_path=preset_file)
                     started_any = True
                 except Exception as e:
-                    #messagebox.showerror("Error", f"Failed to start '{pname}' [{state.process_path}]: {e}")
                     self.log(f"Error: Failed to start '{pname} [{state.process_path}]': {e}")
-
+        
+        
         if started_any:
             self.root.update()
-            self.log("Waiting 5 seconds for windows to appear...")
-            time.sleep(5)
-            
+            self.log("Waiting for windows to appear...")
 
-        for pname, state in self.window_states.items():
-            if pname == "main_window":
-                continue  # Skip placeholder entries
-            
-            windows = [w for w in gw.getAllWindows() if get_process_name_for_window(w) == pname and (win32gui.IsWindowVisible(w._hWnd) or win32gui.IsIconic(w._hWnd))]
-            
-            if windows:
-                win = windows[0]
-                hwnd = win._hWnd  # get the handle for win32gui call
-                win.moveTo(*state.position)
-                win.resizeTo(*state.size)
-                
-                # Minimize window if it was saved as minimized
-                if hasattr(state, 'minimized') and state.minimized:
-                    win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
-                
-                self.log(f"Moved and resized window for {pname}")
-            else:
-                self.log(f"Warning: Window for '{pname}' not found.")
+        max_wait_time = 30  # seconds
+        waited = 0
+        processed = set()
+
+        while waited < max_wait_time:
+            all_found = True
+
+            for pname, state in self.window_states.items():
+                if pname == "main_window" or pname in processed:
+                    continue
+
+                windows = [w for w in gw.getAllWindows()
+                           if get_process_name_for_window(w) == pname and
+                           (win32gui.IsWindowVisible(w._hWnd) or win32gui.IsIconic(w._hWnd))]
+
+                if windows:
+                    moved_resized_any = True
+                    win = windows[0]
+                    hwnd = win._hWnd
+                    win.moveTo(*state.position)
+                    win.resizeTo(*state.size)
+
+                    if hasattr(state, 'minimized') and state.minimized:
+                        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+
+                    self.log(f"Moved and resized window for {pname}")
+                    processed.add(pname)
+                else:
+                    all_found = False
+
+            if all_found:
+                if moved_resized_any:
+                    self.log(f"All processes moved and resized.")
+                break
+
+            time.sleep(1)
+            waited += 1
+
+        # Final check for any still-missing windows
+        for pname in self.window_states:
+            if pname != "main_window" and pname not in processed:
+                self.log(f"Warning: Window for '{pname}' not found after waiting.")
         
         # Refresh the process list after the wait
         self.refresh_window_list()
