@@ -18,7 +18,7 @@ import argparse
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.1.0"
+current_version = "v0.0.9"
 
 
 def parse_args():
