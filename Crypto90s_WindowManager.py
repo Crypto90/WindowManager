@@ -18,7 +18,7 @@ import argparse
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.0.9"
+current_version = "v0.1.0"
 
 
 def parse_args():
@@ -172,7 +172,7 @@ def get_uwp_app_name(package_family_name_substring):
         # Run PowerShell command to get all start apps with full AppIDs using Format-List
         process = subprocess.Popen(
             ["powershell", "-Command", "Get-StartApps | Format-List Name, AppID"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIP, shell=False
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False
         )
 
         stdout, stderr = process.communicate()
