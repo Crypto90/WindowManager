@@ -18,7 +18,7 @@ import argparse
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.1.1"
+current_version = "v0.1.2"
 
 
 def parse_args():
@@ -401,17 +401,18 @@ class WindowManagerApp:
         except Exception as e:
             self.log(f"Error setting launcher override: {e}")
 
+    #stdout=subprocess.DEVNULL,
+    #stderr=subprocess.DEVNULL,
+    #stdin=subprocess.DEVNULL,
+    #creationflags=CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
     def launch_independent(self, path):
-        CREATE_NEW_CONSOLE = 0x00000010  # Better than DETACHED_PROCESS for hiding console output
+        CREATE_NEW_CONSOLE = 0x00000010
         try:
             subprocess.Popen(
                 [path],
                 cwd=os.path.dirname(path),
                 creationflags=CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                shell=True
+                shell=False  # Only use True if path is a string command, not a real path
             )
         except Exception as e:
             print(f"Error launching: {e}")
