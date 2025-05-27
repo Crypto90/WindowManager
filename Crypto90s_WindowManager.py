@@ -18,7 +18,7 @@ import argparse
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.1.0"
+current_version = "v0.1.1"
 
 
 def parse_args():
@@ -731,11 +731,21 @@ class WindowManagerApp:
                     moved_resized_any = True
                     win = windows[0]
                     hwnd = win._hWnd
+                    
+                    
+                    # Check if window is maximized
+                    placement = win32gui.GetWindowPlacement(hwnd)
+                    if placement[1] == win32con.SW_SHOWMAXIMIZED:
+                        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                    
                     win.moveTo(*state.position)
                     win.resizeTo(*state.size)
 
                     if hasattr(state, 'minimized') and state.minimized:
                         win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                    
+                    
+                    
 
                     self.log(f"Moved and resized window for {pname}")
                     processed.add(pname)
