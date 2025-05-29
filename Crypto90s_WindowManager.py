@@ -20,7 +20,7 @@ from pygetwindow import PyGetWindowException
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.1.3"
+current_version = "v0.1.4"
 
 
 def parse_args():
@@ -761,7 +761,7 @@ class WindowManagerApp:
                         
                         # Check if window is maximized
                         placement = win32gui.GetWindowPlacement(hwnd)
-                        if placement[1] == win32con.SW_SHOWMAXIMIZED:
+                        if placement[1] == win32con.SW_SHOWMINIMIZED or placement[1] == win32con.SW_SHOWMAXIMIZED:
                             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                         
                         win.moveTo(*state.position)
