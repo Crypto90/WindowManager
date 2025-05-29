@@ -14,11 +14,13 @@ import webbrowser
 import pygetwindow as gw
 import sys
 import argparse
+from pygetwindow import PyGetWindowException
+
 
 import ctypes
 from ctypes import wintypes
 
-current_version = "v0.1.2"
+current_version = "v0.1.3"
 
 
 def parse_args():
@@ -368,7 +370,7 @@ class WindowManagerApp:
                 self.process_listbox.selection_set(index)
                 self.context_menu.post(event.x_root, event.y_root)
         except Exception as e:
-            print("Error showing context menu:", e)
+            print("Error: showing context menu:", e)
     
     def set_launcher_override(self):
         from tkinter import filedialog
@@ -399,7 +401,7 @@ class WindowManagerApp:
             self.refresh_window_list()
 
         except Exception as e:
-            self.log(f"Error setting launcher override: {e}")
+            self.log(f"Error: setting launcher override: {e}")
 
     #stdout=subprocess.DEVNULL,
     #stderr=subprocess.DEVNULL,
@@ -415,7 +417,7 @@ class WindowManagerApp:
                 shell=False  # Only use True if path is a string command, not a real path
             )
         except Exception as e:
-            print(f"Error launching: {e}")
+            print(f"Error: launching: {e}")
     
     def try_start_application(self, pname, state, window_states, save_path, auto_close_flag=False, UWP=False):
         
@@ -441,7 +443,7 @@ class WindowManagerApp:
                     #self.launch_independent(uwp_start_command)
                     self.log(f"Started UWP app: {uwp_app_name}")
                 else:
-                    self.log(f"Failed to find AppUserModelId for {pname}")
+                    self.log(f"Error: Failed to find AppUserModelId for {pname}")
             else:
                 self.launch_independent(launcher_path)
                 self.log(f"Started app: {launcher_path}")
@@ -455,7 +457,7 @@ class WindowManagerApp:
         for root, dirs, files in os.walk(parent_dir):
             if filename in files:
                 new_path = os.path.join(root, filename)
-                print(f"App update with changed path detected: {new_path}")
+                print(f"Info: App update with changed path detected: {new_path}")
 
                 # Update paths in memory
                 updated = False
@@ -521,9 +523,31 @@ class WindowManagerApp:
     
     def log(self, message):
         self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, message + "\n")
+
+        # Define tags if they don't exist
+        if "error" not in self.log_text.tag_names():
+            self.log_text.tag_config("error", foreground="red")
+        if "info" not in self.log_text.tag_names():
+            self.log_text.tag_config("info", foreground="dark blue")
+
+        # Determine which tag to use
+        lower_msg = message.lower()
+        if any(keyword in lower_msg for keyword in ["error", "exception", "fatal"]):
+            tag = "error"
+        elif "info" in lower_msg:
+            tag = "info"
+        else:
+            tag = None
+
+        # Insert the message with the appropriate tag
+        if tag:
+            self.log_text.insert(tk.END, message + "\n", tag)
+        else:
+            self.log_text.insert(tk.END, message + "\n")
+
         self.log_text.see(tk.END)
         self.log_text.config(state=tk.DISABLED)
+
 
     def refresh_window_list(self):
         self.process_listbox.delete(0, tk.END)
@@ -592,7 +616,7 @@ class WindowManagerApp:
 
                 except Exception as e:
                     label = f"{star}{pname} (Title: {win.title[:30]}, Size: N/A, Position: N/A)"
-                    print(f"Error retrieving window size and position: {e}")
+                    print(f"Error: retrieving window size and position: {e}")
 
                 self.process_listbox.insert(tk.END, label)
                 index = self.process_listbox.size() - 1
@@ -667,7 +691,7 @@ class WindowManagerApp:
                 self.window_states[process_name] = WindowState(process_name, position, size, path, url, minimized=is_minimized, launcher_override=launcher_override_restore)
                 self.log(f"Saved: {process_name} at {position} size {size}. Minimized: {is_minimized}")
             except Exception as e:
-                self.log(f"Error saving {process_name}: {e}")
+                self.log(f"Error: saving {process_name}: {e}")
 
         # Save config state
         config = {
@@ -733,23 +757,31 @@ class WindowManagerApp:
                     win = windows[0]
                     hwnd = win._hWnd
                     
-                    
-                    # Check if window is maximized
-                    placement = win32gui.GetWindowPlacement(hwnd)
-                    if placement[1] == win32con.SW_SHOWMAXIMIZED:
-                        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                    
-                    win.moveTo(*state.position)
-                    win.resizeTo(*state.size)
+                    try:
+                        
+                        # Check if window is maximized
+                        placement = win32gui.GetWindowPlacement(hwnd)
+                        if placement[1] == win32con.SW_SHOWMAXIMIZED:
+                            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                        
+                        win.moveTo(*state.position)
+                        win.resizeTo(*state.size)
 
-                    if hasattr(state, 'minimized') and state.minimized:
-                        win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                        if hasattr(state, 'minimized') and state.minimized:
+                            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
                     
-                    
-                    
+                        self.log(f"Moved and resized window for {pname}")
+                        processed.add(pname)
+                        
+                        
+                    except PyGetWindowException as e:
+                        if "Error code from Windows: 5" in str(e):
+                            self.log(f"Error: Permission denied: Cannot move window for '{pname}'. Try running as administrator.")
+                        else:
+                            self.log(f"Error: Failed to move/resize window for '{pname}': {e}")
+                    except Exception as e:
+                        self.log(f"Error: Unexpected error while handling window '{pname}': {e}")
 
-                    self.log(f"Moved and resized window for {pname}")
-                    processed.add(pname)
                 else:
                     all_found = False
 
