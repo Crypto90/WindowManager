@@ -7,7 +7,7 @@ This is a simple desktop application built using tkinter that allows users to ma
 `--preset 1-10` Automatically starts the program with the given preset number.
 
 # Download prebuild executable:
-[Download WindowManager v0.1.2](https://github.com/Crypto90/WindowManager/releases/download/0.1.2/Crypto90s_WindowManager.exe)
+[Download WindowManager v0.1.3](https://github.com/Crypto90/WindowManager/releases/download/0.1.3/Crypto90s_WindowManager.exe)
 
 # Screenshot:
 ![til](./preview.png)
