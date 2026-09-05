@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog, simpledialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import psutil
 import pickle
 import json
@@ -31,7 +31,7 @@ else:
     get_monitors = lambda: []
     PyGetWindowException = Exception
 
-current_version = "v0.2.1"
+current_version = "v0.2.2"
 
 
 def enable_high_dpi():
@@ -159,9 +159,8 @@ def get_preset_filepath(preset_number, ext=".json", prefix="workspace_states_"):
 def load_window_states(preset_number=1):
     """
     Loads window states for a preset.
-    Checks workspace_states_{n}.json first, then falls back to legacy window_states_{n} files.
+    Checks workspace_states_{n}.json first, then falls back to legacy files.
     """
-    # Candidate paths in order of preference
     candidates = [
         get_preset_filepath(preset_number, ".json", "workspace_states_"),
         get_preset_filepath(preset_number, ".json", "window_states_"),
@@ -173,13 +172,12 @@ def load_window_states(preset_number=1):
         if not os.path.isfile(path):
             continue
 
-        # JSON loader
         if path.endswith(".json"):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, dict):
-                    raw_states = data.get("window_states", {}) or data.get("workspace_states", {})
+                    raw_states = data.get("workspace_states", {}) or data.get("window_states", {})
                     config = data.get("config", {})
                     window_states = {}
                     for k, v in raw_states.items():
@@ -190,13 +188,12 @@ def load_window_states(preset_number=1):
             except Exception as e:
                 print(f"Warning: Failed to load JSON preset from {path}: {e}")
 
-        # Legacy PKL loader and auto-migrator
         elif path.endswith(".pkl"):
             try:
                 with open(path, "rb") as f:
                     data = pickle.load(f)
                 if isinstance(data, dict):
-                    raw_states = data.get("window_states", {}) or data.get("workspace_states", {})
+                    raw_states = data.get("workspace_states", {}) or data.get("window_states", {})
                     config = data.get("config", {})
                     if not raw_states and not config:
                         raw_states = data
@@ -214,7 +211,6 @@ def load_window_states(preset_number=1):
                             if state_obj:
                                 window_states[k] = state_obj
 
-                    # Save to new workspace_states format
                     save_window_states(window_states, config, preset_number)
                     print(f"Info: Migrated preset {preset_number} from legacy PKL to JSON format.")
                     return window_states, config
@@ -237,7 +233,7 @@ def save_window_states(window_states, config=None, preset_number=1):
     data = {
         "version": current_version,
         "workspace_states": serialized_states,
-        "window_states": serialized_states,  # Dual-key for seamless compatibility
+        "window_states": serialized_states,  # Backward compatibility
         "config": config or {}
     }
 
@@ -345,7 +341,6 @@ def get_visible_windows_grouped_by_monitor():
         if not win32gui.IsWindowEnabled(hWnd):
             continue
 
-        # Include windows that are either visible or minimized
         if not (win32gui.IsWindowVisible(hWnd) or win32gui.IsIconic(hWnd)):
             continue
 
@@ -357,7 +352,7 @@ def get_visible_windows_grouped_by_monitor():
 
         monitor = get_monitor_for_window(window, monitors)
         if monitor:
-            mon_id = f"{monitor.x}x{monitor.y} ({monitor.width}x{monitor.height})"
+            mon_id = f"Monitor {monitor.x}x{monitor.y} ({monitor.width}x{monitor.height})"
         else:
             mon_id = "Default Display"
 
@@ -376,9 +371,7 @@ def is_uwp_window(window):
 
 
 def get_uwp_app_info(path):
-    """
-    Extracts package folder name and looks up AppUserModelId (AUMID) for UWP applications.
-    """
+    """Extracts package folder name and looks up AUMID for UWP applications."""
     if not path or "WindowsApps" not in path:
         return None, None
     try:
@@ -387,7 +380,6 @@ def get_uwp_app_info(path):
             if "__" in part:
                 package_folder = part
                 identifier = package_folder.split("__")[-1]
-                # Query PowerShell for AppID
                 cmd = ["powershell", "-NoProfile", "-Command", "Get-StartApps | Format-List Name, AppID"]
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
                 stdout, _ = proc.communicate(timeout=5)
@@ -441,7 +433,6 @@ def set_start_with_windows(enabled, preset=1):
             else:
                 exe_cmd = f'"{sys.executable}" "{os.path.abspath(__file__)}" --preset {preset} --silent'
             winreg.SetValueEx(key, "Crypto90s_WorkspaceManager", 0, winreg.REG_SZ, exe_cmd)
-            # Remove legacy key if it existed
             try:
                 winreg.DeleteValue(key, "Crypto90s_WindowManager")
             except FileNotFoundError:
@@ -466,157 +457,401 @@ class WorkspaceManagerApp:
         self.current_preset_num = initial_preset
 
         self.window_states, self.config = load_window_states(self.current_preset_num)
-        self.window_mapping = []  # Stores mapping for listbox rows: (key, window_obj, pname, ppath) or None
+        self.tree_item_map = {}  # item_id -> (state_key, window_obj, pname, ppath, is_offline)
         self.ordering_in_progress = False
         self.cancel_ordering = False
         self.auto_close_job = None
 
-        self.root.minsize(width=580, height=480)
-        self.root.configure(bg="#1e1e1e")
+        # Modern Dark Slate Theme Palette
+        self.BG_MAIN = "#121418"
+        self.BG_CARD = "#1a1d24"
+        self.BG_HOVER = "#242832"
+        self.BORDER_COLOR = "#2a303c"
+        self.ACCENT_CYAN = "#00d2ff"
+        self.ACCENT_GREEN = "#10b981"
+        self.ACCENT_RED = "#ef4444"
+        self.TEXT_PRIMARY = "#f1f5f9"
+        self.TEXT_MUTED = "#94a3b8"
 
-        # Top Bar: Process listbox with scrollbar
-        self.process_listbox_frame = tk.Frame(self.root, bg="#1e1e1e")
-        self.process_listbox_frame.pack(padx=10, pady=8, fill=tk.BOTH, expand=True)
+        self.root.minsize(width=780, height=560)
+        self.root.geometry("860x640")
+        self.root.configure(bg=self.BG_MAIN)
 
-        self.process_listbox = tk.Listbox(
-            self.process_listbox_frame,
-            selectmode=tk.MULTIPLE,
-            bg="#252525",
-            fg="#f0f0f0",
-            selectbackground="#1e6b37",
-            selectforeground="#ffffff",
-            highlightbackground="#3d3d3d",
-            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9),
-            relief=tk.FLAT
-        )
-        self.process_listbox_scrollbar = tk.Scrollbar(
-            self.process_listbox_frame,
-            orient="vertical",
-            command=self.process_listbox.yview,
-            troughcolor="#252525",
-            bg="#444"
-        )
-        self.process_listbox.config(yscrollcommand=self.process_listbox_scrollbar.set)
-        self.process_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.process_listbox_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Preset Management Frame
-        preset_frame = tk.Frame(self.root, bg="#1e1e1e")
-        preset_frame.pack(pady=4)
-
-        self.current_preset = tk.StringVar(value=f"Preset {self.current_preset_num}")
-        tk.Label(preset_frame, text="Presets:", fg="#ffffff", bg="#1e1e1e", font=("Segoe UI", 9, "bold")).pack(side="left", padx=5)
-
-        self.preset_radios = []
-        for i in range(1, 11):
-            name = f"Preset {i}"
-            rb = tk.Radiobutton(
-                preset_frame, text=str(i), variable=self.current_preset, value=name,
-                command=self.switch_preset, bg="#1e1e1e", fg="#ffffff", selectcolor="#333333",
-                activebackground="#1e1e1e", activeforeground="#3498db"
-            )
-            rb.pack(side="left", padx=2)
-            self.preset_radios.append(rb)
-
-        tk.Button(preset_frame, text="✏️ Rename", bg="#3d3d3d", fg="#ffffff", relief=tk.FLAT,
-                  padx=5, font=("Segoe UI", 8), command=self.rename_current_preset).pack(side="left", padx=6)
-
-        # Options Frame: Auto-close & Run at Windows Startup
-        options_frame = tk.Frame(self.root, bg="#1e1e1e")
-        options_frame.pack(pady=4)
-
-        self.auto_close_var = tk.BooleanVar(value=self.config.get("auto_close", False))
-        self.auto_close_checkbox = tk.Checkbutton(
-            options_frame, text="Auto-close after ordering", variable=self.auto_close_var,
-            command=self.on_auto_close_toggle, bg="#1e1e1e", fg="#ffffff", selectcolor="#333333",
-            activebackground="#1e1e1e", activeforeground="#ffffff"
-        )
-        self.auto_close_checkbox.pack(side="left", padx=10)
-
-        self.startup_var = tk.BooleanVar(value=is_start_with_windows_enabled())
-        self.startup_checkbox = tk.Checkbutton(
-            options_frame, text="Run at Windows Startup", variable=self.startup_var,
-            command=self.on_startup_toggle, bg="#1e1e1e", fg="#ffffff", selectcolor="#333333",
-            activebackground="#1e1e1e", activeforeground="#ffffff"
-        )
-        self.startup_checkbox.pack(side="left", padx=10)
-
-        # Action Button Frame
-        button_frame = tk.Frame(self.root, bg="#1e1e1e")
-        button_frame.pack(pady=6)
-
-        tk.Button(button_frame, text="🔄 Refresh Windows", bg="#2980b9", fg="white", relief=tk.FLAT,
-                  command=self.refresh_window_list, padx=8, pady=3).pack(side="left", padx=4)
-        tk.Button(button_frame, text="💾 Save Selected Positions", bg="#7f8c8d", fg="white", relief=tk.FLAT,
-                  command=self.save_window_positions, padx=8, pady=3).pack(side="left", padx=4)
-
-        self.order_button = tk.Button(button_frame, text="🚀 Start, Resize & Order", bg="#27ae60", fg="white",
-                                      relief=tk.FLAT, command=self.toggle_stream_order, padx=10, pady=3,
-                                      font=("Segoe UI", 9, "bold"))
-        self.order_button.pack(side="left", padx=4)
-
-        tk.Button(button_frame, text="☕ Buy Coffee", bg="#e67e22", fg="white", relief=tk.FLAT,
-                  command=lambda: webbrowser.open("https://ko-fi.com/crypto90"), padx=6, pady=3).pack(side="left", padx=4)
-
-        # Log box frame (Packed at bottom)
-        self.log_text_frame = tk.Frame(self.root, bg="#1e1e1e")
-        self.log_text_frame.pack(padx=10, pady=6, fill=tk.X, side=tk.BOTTOM)
-
-        self.log_text = tk.Text(
-            self.log_text_frame,
-            height=8,
-            state=tk.DISABLED,
-            bg="#181818",
-            fg="#e0e0e0",
-            insertbackground="white",
-            highlightbackground="#333",
-            font=("Consolas" if IS_WINDOWS else "Courier", 9),
-            relief=tk.FLAT
-        )
-
-        self.log_text_scrollbar = tk.Scrollbar(
-            self.log_text_frame,
-            orient="vertical",
-            command=self.log_text.yview,
-            troughcolor="#181818",
-            bg="#333"
-        )
-        self.log_text.config(yscrollcommand=self.log_text_scrollbar.set)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.log_text_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Pre-configure log color tags
-        self.log_text.tag_config("error", foreground="#e74c3c")    # Bright Red
-        self.log_text.tag_config("info", foreground="#3498db")     # Vibrant Cyan / Blue
-        self.log_text.tag_config("success", foreground="#2ecc71")  # Bright Green
-        self.log_text.tag_config("warn", foreground="#f39c12")     # Amber / Orange
-        self.log_text.tag_config("time", foreground="#888888")     # Muted timestamp
-
-        # Context Menu
-        self.context_menu = tk.Menu(self.root, tearoff=0, bg="#2d2d2d", fg="white", activebackground="#3498db")
-        self.context_menu.add_command(label="Add Launcher Override...", command=self.set_launcher_override)
-        self.context_menu.add_command(label="Remove Launcher Override", command=self.remove_launcher_override)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="Open File Location", command=self.open_file_location)
-        self.process_listbox.bind("<Button-3>", self.show_context_menu)
-        if sys.platform == "darwin":
-            self.process_listbox.bind("<Button-2>", self.show_context_menu)
-
-        # Initial Welcome Log
-        self.log("------------------------------------------------", tag="info")
-        self.log(f"Crypto90's Workspace Manager {current_version} Initialized", tag="success")
-        self.log(f"Storage: {get_data_dir()}", tag="info")
-        self.log("------------------------------------------------", tag="info")
+        self._configure_ttk_styles()
+        self._build_header_ui()
+        self._build_preset_bar_ui()
+        self._build_options_ui()
+        self._build_table_ui()
+        self._build_actions_ui()
+        self._build_console_ui()
+        self._build_status_bar_ui()
+        self._build_context_menu()
 
         self.update_preset_labels()
         self.populate_window_list()
 
-        # Restore main window geometry if saved
         if "main_window" in self.window_states:
             self.restore_main_window_position()
 
-        # Execute initial order safely after GUI has mounted
-        self.root.after(300, self.start_stream_order)
+        # Initial launch trigger
+        self.root.after(350, self.start_stream_order)
+
+    def _configure_ttk_styles(self):
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        font_family = "Segoe UI" if IS_WINDOWS else "Helvetica"
+
+        # Treeview Dark Styling
+        style.configure(
+            "Custom.Treeview",
+            background="#16191f",
+            foreground=self.TEXT_PRIMARY,
+            fieldbackground="#16191f",
+            rowheight=26,
+            font=(font_family, 9),
+            borderwidth=0
+        )
+        style.configure(
+            "Custom.Treeview.Heading",
+            background="#20242d",
+            foreground=self.TEXT_MUTED,
+            font=(font_family, 9, "bold"),
+            relief="flat",
+            padding=5
+        )
+        style.map(
+            "Custom.Treeview",
+            background=[("selected", "#0d9488")],  # Sleek teal highlight
+            foreground=[("selected", "#ffffff")]
+        )
+        style.map(
+            "Custom.Treeview.Heading",
+            background=[("active", "#282e39")]
+        )
+
+    def _build_header_ui(self):
+        header_frame = tk.Frame(self.root, bg=self.BG_CARD, height=44)
+        header_frame.pack(fill=tk.X, padx=0, pady=0)
+
+        # Brand / Title
+        brand_label = tk.Label(
+            header_frame,
+            text="🖥️  Crypto90's Workspace Manager",
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 11, "bold"),
+            fg=self.TEXT_PRIMARY,
+            bg=self.BG_CARD
+        )
+        brand_label.pack(side=tk.LEFT, padx=14, pady=8)
+
+        # Version Badge
+        version_badge = tk.Label(
+            header_frame,
+            text=current_version,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 8, "bold"),
+            fg=self.ACCENT_CYAN,
+            bg="#222834",
+            padx=6,
+            pady=1
+        )
+        version_badge.pack(side=tk.LEFT, padx=4, pady=8)
+
+        # Display Counter
+        monitors_count = len(get_monitors()) if IS_WINDOWS else 1
+        self.display_badge = tk.Label(
+            header_frame,
+            text=f"🖥️ Displays Detected: {monitors_count}",
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9),
+            fg=self.TEXT_MUTED,
+            bg=self.BG_CARD
+        )
+        self.display_badge.pack(side=tk.RIGHT, padx=14, pady=8)
+
+    def _build_preset_bar_ui(self):
+        preset_frame = tk.Frame(self.root, bg=self.BG_MAIN)
+        preset_frame.pack(fill=tk.X, padx=14, pady=(10, 4))
+
+        tk.Label(
+            preset_frame,
+            text="Active Preset:",
+            fg=self.TEXT_PRIMARY,
+            bg=self.BG_MAIN,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9, "bold")
+        ).pack(side=tk.LEFT, padx=(0, 8))
+
+        self.current_preset = tk.StringVar(value=f"Preset {self.current_preset_num}")
+        self.preset_radios = []
+
+        # Segmented Preset Buttons
+        p_container = tk.Frame(preset_frame, bg=self.BG_CARD, bd=1, relief=tk.FLAT)
+        p_container.pack(side=tk.LEFT, padx=0)
+
+        for i in range(1, 11):
+            name = f"Preset {i}"
+            rb = tk.Radiobutton(
+                p_container,
+                text=str(i),
+                variable=self.current_preset,
+                value=name,
+                command=self.switch_preset,
+                bg=self.BG_CARD,
+                fg=self.TEXT_MUTED,
+                selectcolor="#0f766e",
+                activebackground=self.BG_CARD,
+                activeforeground=self.ACCENT_CYAN,
+                font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9),
+                indicatoron=False,
+                padx=6,
+                pady=3,
+                bd=0
+            )
+            rb.pack(side=tk.LEFT, padx=1)
+            self.preset_radios.append(rb)
+
+        # Rename Button
+        tk.Button(
+            preset_frame,
+            text="✏️ Rename",
+            bg="#2a303c",
+            fg=self.TEXT_PRIMARY,
+            activebackground=self.BG_HOVER,
+            activeforeground="#ffffff",
+            relief=tk.FLAT,
+            padx=8,
+            pady=3,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 8, "bold"),
+            command=self.rename_current_preset
+        ).pack(side=tk.LEFT, padx=10)
+
+    def _build_options_ui(self):
+        options_frame = tk.Frame(self.root, bg=self.BG_MAIN)
+        options_frame.pack(fill=tk.X, padx=14, pady=(2, 6))
+
+        self.auto_close_var = tk.BooleanVar(value=self.config.get("auto_close", False))
+        self.auto_close_checkbox = tk.Checkbutton(
+            options_frame,
+            text="Auto-close after ordering",
+            variable=self.auto_close_var,
+            command=self.on_auto_close_toggle,
+            bg=self.BG_MAIN,
+            fg=self.TEXT_MUTED,
+            selectcolor="#2a303c",
+            activebackground=self.BG_MAIN,
+            activeforeground=self.TEXT_PRIMARY,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9)
+        )
+        self.auto_close_checkbox.pack(side=tk.LEFT, padx=(0, 16))
+
+        self.startup_var = tk.BooleanVar(value=is_start_with_windows_enabled())
+        self.startup_checkbox = tk.Checkbutton(
+            options_frame,
+            text="Run at Windows Startup",
+            variable=self.startup_var,
+            command=self.on_startup_toggle,
+            bg=self.BG_MAIN,
+            fg=self.TEXT_MUTED,
+            selectcolor="#2a303c",
+            activebackground=self.BG_MAIN,
+            activeforeground=self.TEXT_PRIMARY,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9)
+        )
+        self.startup_checkbox.pack(side=tk.LEFT, padx=0)
+
+    def _build_table_ui(self):
+        table_card = tk.Frame(self.root, bg=self.BG_CARD, bd=1, relief=tk.FLAT)
+        table_card.pack(fill=tk.BOTH, expand=True, padx=14, pady=4)
+
+        # Columns definition
+        columns = ("status", "app", "title", "monitor", "coords", "state")
+        self.tree = ttk.Treeview(
+            table_card,
+            columns=columns,
+            show="headings",
+            selectmode="extended",
+            style="Custom.Treeview"
+        )
+
+        self.tree.heading("status", text="Status", anchor=tk.W)
+        self.tree.heading("app", text="Application", anchor=tk.W)
+        self.tree.heading("title", text="Window Title", anchor=tk.W)
+        self.tree.heading("monitor", text="Monitor", anchor=tk.W)
+        self.tree.heading("coords", text="Coordinates / Size", anchor=tk.W)
+        self.tree.heading("state", text="Window State", anchor=tk.CENTER)
+
+        self.tree.column("status", width=95, minwidth=70, stretch=False)
+        self.tree.column("app", width=140, minwidth=110, stretch=False)
+        self.tree.column("title", width=220, minwidth=140, stretch=True)
+        self.tree.column("monitor", width=150, minwidth=100, stretch=False)
+        self.tree.column("coords", width=140, minwidth=110, stretch=False)
+        self.tree.column("state", width=95, minwidth=70, stretch=False)
+
+        # Scrollbar
+        sb_y = tk.Scrollbar(table_card, orient=tk.VERTICAL, command=self.tree.yview, bg=self.BG_CARD)
+        self.tree.configure(yscrollcommand=sb_y.set)
+
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Row Tags
+        self.tree.tag_configure("saved", foreground="#34d399")       # Mint / Emerald
+        self.tree.tag_configure("override", foreground="#38bdf8")    # Cyan
+        self.tree.tag_configure("offline", foreground="#f87171")     # Light Red
+        self.tree.tag_configure("normal", foreground="#e2e8f0")      # Bright White
+        self.tree.tag_configure("header", background="#222834", foreground="#38bdf8", font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9, "bold"))
+
+    def _build_actions_ui(self):
+        action_bar = tk.Frame(self.root, bg=self.BG_MAIN)
+        action_bar.pack(fill=tk.X, padx=14, pady=8)
+
+        # Buttons with modern flat styling
+        tk.Button(
+            action_bar,
+            text="🔄 Refresh List",
+            bg="#2563eb",
+            fg="white",
+            activebackground="#1d4ed8",
+            activeforeground="white",
+            relief=tk.FLAT,
+            padx=12,
+            pady=4,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9, "bold"),
+            command=self.refresh_window_list
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        tk.Button(
+            action_bar,
+            text="💾 Save Selected to Preset",
+            bg="#475569",
+            fg="white",
+            activebackground="#334155",
+            activeforeground="white",
+            relief=tk.FLAT,
+            padx=12,
+            pady=4,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9, "bold"),
+            command=self.save_window_positions
+        ).pack(side=tk.LEFT, padx=6)
+
+        self.order_button = tk.Button(
+            action_bar,
+            text="🚀 Start, Resize & Order",
+            bg="#059669",
+            fg="white",
+            activebackground="#047857",
+            activeforeground="white",
+            relief=tk.FLAT,
+            padx=14,
+            pady=4,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9, "bold"),
+            command=self.toggle_stream_order
+        )
+        self.order_button.pack(side=tk.LEFT, padx=6)
+
+        tk.Button(
+            action_bar,
+            text="☕ Buy Coffee",
+            bg="#d97706",
+            fg="white",
+            activebackground="#b45309",
+            activeforeground="white",
+            relief=tk.FLAT,
+            padx=10,
+            pady=4,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 9, "bold"),
+            command=lambda: webbrowser.open("https://ko-fi.com/crypto90")
+        ).pack(side=tk.RIGHT, padx=0)
+
+    def _build_console_ui(self):
+        console_container = tk.Frame(self.root, bg=self.BG_MAIN)
+        console_container.pack(fill=tk.X, padx=14, pady=(2, 6))
+
+        # Console Header
+        bar = tk.Frame(console_container, bg=self.BG_CARD, height=24)
+        bar.pack(fill=tk.X)
+
+        tk.Label(
+            bar,
+            text="ACTIVITY & DIAGNOSTICS CONSOLE",
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 8, "bold"),
+            fg=self.TEXT_MUTED,
+            bg=self.BG_CARD
+        ).pack(side=tk.LEFT, padx=8, pady=2)
+
+        tk.Button(
+            bar,
+            text="Clear Console",
+            bg=self.BG_CARD,
+            fg=self.TEXT_MUTED,
+            activebackground=self.BG_CARD,
+            activeforeground=self.TEXT_PRIMARY,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 7),
+            relief=tk.FLAT,
+            bd=0,
+            command=self.clear_console
+        ).pack(side=tk.RIGHT, padx=6)
+
+        # Text Console
+        log_frame = tk.Frame(console_container, bg="#0f1115")
+        log_frame.pack(fill=tk.X)
+
+        self.log_text = tk.Text(
+            log_frame,
+            height=6,
+            state=tk.DISABLED,
+            bg="#0f1115",
+            fg="#e2e8f0",
+            insertbackground="white",
+            highlightbackground=self.BORDER_COLOR,
+            font=("Consolas" if IS_WINDOWS else "Courier", 9),
+            relief=tk.FLAT,
+            padx=6,
+            pady=4
+        )
+
+        sb = tk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview, bg="#0f1115")
+        self.log_text.config(yscrollcommand=sb.set)
+
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Tag configurations
+        self.log_text.tag_config("error", foreground="#f87171")    # Red
+        self.log_text.tag_config("info", foreground="#38bdf8")     # Cyan
+        self.log_text.tag_config("success", foreground="#34d399")  # Emerald
+        self.log_text.tag_config("warn", foreground="#fbbf24")     # Amber
+        self.log_text.tag_config("time", foreground="#64748b")     # Slate timestamp
+
+    def _build_status_bar_ui(self):
+        self.status_bar = tk.Label(
+            self.root,
+            text="Ready",
+            bg=self.BG_CARD,
+            fg=self.TEXT_MUTED,
+            font=("Segoe UI" if IS_WINDOWS else "Helvetica", 8),
+            anchor=tk.W,
+            padx=12,
+            pady=3
+        )
+        self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+
+    def _build_context_menu(self):
+        self.context_menu = tk.Menu(self.root, tearoff=0, bg="#20242d", fg="white", activebackground="#0d9488")
+        self.context_menu.add_command(label="Add Launcher Override...", command=self.set_launcher_override)
+        self.context_menu.add_command(label="Remove Launcher Override", command=self.remove_launcher_override)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Open Executable Location", command=self.open_file_location)
+
+        self.tree.bind("<Button-3>", self.show_context_menu)
+        if sys.platform == "darwin":
+            self.tree.bind("<Button-2>", self.show_context_menu)
+
+    def clear_console(self):
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.config(state=tk.DISABLED)
 
     def log(self, message, tag=None):
         """Thread-safe, timestamped logging to the UI log window."""
@@ -630,7 +865,7 @@ class WorkspaceManagerApp:
                 lower = message.lower()
                 if any(w in lower for keyword in ["error", "exception", "failed", "denied"] for w in [keyword]):
                     chosen_tag = "error"
-                elif any(w in lower for keyword in ["success", "saved", "restored", "started"] for w in [keyword]):
+                elif any(w in lower for keyword in ["success", "saved", "restored", "started", "arranged"] for w in [keyword]):
                     chosen_tag = "success"
                 elif "warn" in lower:
                     chosen_tag = "warn"
@@ -644,6 +879,9 @@ class WorkspaceManagerApp:
 
             self.log_text.see(tk.END)
             self.log_text.config(state=tk.DISABLED)
+
+            # Update status bar
+            self.status_bar.config(text=f"Last event: {message}")
 
         if threading.current_thread() is threading.main_thread():
             _append()
@@ -706,33 +944,30 @@ class WorkspaceManagerApp:
 
     def show_context_menu(self, event):
         try:
-            index = self.process_listbox.nearest(event.y)
-            if index < 0 or index >= len(self.window_mapping):
+            item_id = self.tree.identify_row(event.y)
+            if not item_id or item_id not in self.tree_item_map:
                 return
-            entry = self.window_mapping[index]
+            entry = self.tree_item_map[item_id]
             if not entry:
-                return  # Header row
+                return
 
-            self.process_listbox.selection_clear(0, tk.END)
-            self.process_listbox.selection_set(index)
+            self.tree.selection_set(item_id)
             self.context_menu.post(event.x_root, event.y_root)
         except Exception as e:
             print(f"Error showing context menu: {e}")
 
     def get_selected_mapping_entry(self):
-        selection = self.process_listbox.curselection()
+        selection = self.tree.selection()
         if not selection:
             return None
-        index = selection[0]
-        if index < len(self.window_mapping):
-            return self.window_mapping[index]
-        return None
+        item_id = selection[0]
+        return self.tree_item_map.get(item_id)
 
     def set_launcher_override(self):
         entry = self.get_selected_mapping_entry()
         if not entry:
             return
-        state_key, _, pname, _ = entry
+        state_key, _, pname, _, _ = entry
 
         file_path = filedialog.askopenfilename(
             title=f"Select Launcher Executable for {pname}",
@@ -744,7 +979,6 @@ class WorkspaceManagerApp:
         if state_key in self.window_states:
             self.window_states[state_key].launcher_override = file_path
         else:
-            # Create a placeholder state if not saved yet
             self.window_states[state_key] = WindowState(
                 process_name=pname, position=[100, 100], size=[800, 600],
                 process_path=file_path, launcher_override=file_path
@@ -758,7 +992,7 @@ class WorkspaceManagerApp:
         entry = self.get_selected_mapping_entry()
         if not entry:
             return
-        state_key, _, pname, _ = entry
+        state_key, _, pname, _, _ = entry
 
         if state_key in self.window_states and self.window_states[state_key].launcher_override:
             self.window_states[state_key].launcher_override = None
@@ -770,7 +1004,7 @@ class WorkspaceManagerApp:
         entry = self.get_selected_mapping_entry()
         if not entry:
             return
-        state_key, _, pname, ppath = entry
+        state_key, _, pname, ppath, _ = entry
 
         path = None
         if state_key in self.window_states:
@@ -780,17 +1014,17 @@ class WorkspaceManagerApp:
             path = ppath
 
         if path and os.path.exists(path):
-            folder = os.path.dirname(path)
             if IS_WINDOWS:
                 subprocess.Popen(f'explorer.exe /select,"{path}"')
             else:
-                subprocess.Popen(["open", folder])
+                subprocess.Popen(["open", os.path.dirname(path)])
         else:
             self.log(f"Executable path not found on disk: {path}", tag="warn")
 
     def refresh_window_list(self):
-        self.process_listbox.delete(0, tk.END)
-        self.window_mapping.clear()
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.tree_item_map.clear()
         self.populate_window_list()
 
     def populate_window_list(self):
@@ -806,24 +1040,36 @@ class WorkspaceManagerApp:
                 current_running_keys.add(key)
                 current_running_keys.add(pname)
 
+        saved_item_ids_to_select = []
+
         # 1. Render Saved Applications that are NOT currently running
         for key, state in self.window_states.items():
             if key == "main_window":
                 continue
             if state.process_name not in current_running_keys and key not in current_running_keys:
-                star = "★★ " if state.launcher_override else "★ "
-                title_suffix = f" [{state.window_title[:25]}]" if state.window_title else ""
-                label = f"{star}{state.process_name}{title_suffix} (Not running)"
-                self.process_listbox.insert(tk.END, label)
-                idx = self.process_listbox.size() - 1
-                self.process_listbox.itemconfig(idx, {'fg': '#e74c3c'})  # Red
-                self.window_mapping.append((key, None, state.process_name, state.process_path))
+                status_label = "★★ Override" if state.launcher_override else "★ Offline"
+                title_disp = state.window_title or "(Closed)"
+                coords_disp = f"{state.position[0]}, {state.position[1]} [{state.size[0]}x{state.size[1]}]"
+                state_disp = "Maximized" if state.maximized else ("Minimized" if state.minimized else "Normal")
 
-        # 2. Render Currently Open Windows grouped by Monitor
+                row_id = self.tree.insert(
+                    "",
+                    "end",
+                    values=(status_label, state.process_name, title_disp, "Saved State", coords_disp, state_disp),
+                    tags=("offline",)
+                )
+                self.tree_item_map[row_id] = (key, None, state.process_name, state.process_path, True)
+                saved_item_ids_to_select.append(row_id)
+
+        # 2. Render Open Windows grouped by Monitor
         for monitor_name, items in grouped.items():
-            self.process_listbox.insert(tk.END, f"=== Monitor: {monitor_name} ===")
-            self.process_listbox.itemconfig(tk.END, {'fg': '#3498db'})
-            self.window_mapping.append(None)
+            hdr_id = self.tree.insert(
+                "",
+                "end",
+                values=(f"=== {monitor_name} ===", "", "", "", "", ""),
+                tags=("header",)
+            )
+            self.tree_item_map[hdr_id] = None
 
             for win, pname, ppath in items:
                 title = win.title if win else ""
@@ -833,7 +1079,8 @@ class WorkspaceManagerApp:
                 active_state = self.window_states.get(key) or self.window_states.get(pname)
                 saved_override = bool(active_state and active_state.launcher_override)
 
-                star = "★★ " if saved_override else ("★ " if saved else "  ")
+                status_label = "★★ Saved" if saved_override else ("★ Saved" if saved else "🟢 Active")
+                row_tag = "override" if saved_override else ("saved" if saved else "normal")
 
                 try:
                     hwnd = win._hWnd
@@ -853,49 +1100,62 @@ class WorkspaceManagerApp:
                         width = win.width
                         height = win.height
 
-                    uwp_tag = " [UWP]" if is_uwp_window(win) else ""
-                    state_tag = ", Minimized" if hwnd_minimized else (", Maximized" if hwnd_maximized else "")
-                    label = f"{star}{pname} (Title: {title[:28]}, Size: {width}x{height}, Pos: {left},{top}){uwp_tag}{state_tag}"
-                except Exception as e:
-                    label = f"{star}{pname} (Title: {title[:28]}, Size: N/A)"
+                    is_uwp = is_uwp_window(win)
+                    state_tokens = []
+                    if hwnd_maximized:
+                        state_tokens.append("Maximized")
+                    elif hwnd_minimized:
+                        state_tokens.append("Minimized")
+                    else:
+                        state_tokens.append("Normal")
+                    if is_uwp:
+                        state_tokens.append("UWP")
 
-                self.process_listbox.insert(tk.END, label)
-                idx = self.process_listbox.size() - 1
+                    state_disp = " • ".join(state_tokens)
+                    coords_disp = f"{left}, {top} [{width}x{height}]"
+                except Exception:
+                    coords_disp = "N/A"
+                    state_disp = "Normal"
+
+                mon_short = monitor_name.split()[0] + " " + monitor_name.split()[1] if " " in monitor_name else monitor_name
+                row_id = self.tree.insert(
+                    "",
+                    "end",
+                    values=(status_label, pname, title, mon_short, coords_disp, state_disp),
+                    tags=(row_tag,)
+                )
+                self.tree_item_map[row_id] = (key, win, pname, ppath, False)
 
                 if saved:
-                    running = is_process_running(ppath or active_state.process_path, running_cache)
-                    self.process_listbox.itemconfig(idx, {'fg': '#2ecc71' if running else '#e74c3c'})
-                    self.process_listbox.select_set(idx)
+                    saved_item_ids_to_select.append(row_id)
 
-                self.window_mapping.append((key, win, pname, ppath))
+        # Pre-select all saved items
+        if saved_item_ids_to_select:
+            self.tree.selection_set(saved_item_ids_to_select)
 
     def save_window_positions(self):
         """Saves selected window positions while preserving offline apps."""
-        selected_indices = self.process_listbox.curselection()
-        if not selected_indices:
+        selection = self.tree.selection()
+        if not selection:
             self.log("No windows selected to save.", tag="warn")
             return
 
         previous_states, _ = load_window_states(self.current_preset_num)
         new_window_states = {}
 
-        for idx in selected_indices:
-            if idx >= len(self.window_mapping):
-                continue
-            entry = self.window_mapping[idx]
+        for item_id in selection:
+            entry = self.tree_item_map.get(item_id)
             if not entry:
                 continue
 
-            state_key, win, pname, ppath = entry
+            state_key, win, pname, ppath, is_offline = entry
 
-            # Offline / non-running window was selected -> Preserve from previous states
-            if win is None:
+            if is_offline or win is None:
                 if state_key in previous_states:
                     new_window_states[state_key] = previous_states[state_key]
-                    self.log(f"Preserved offline app: {pname}", tag="info")
+                    self.log(f"Preserved offline app in preset: {pname}", tag="info")
                 continue
 
-            # Currently open window
             try:
                 hwnd = win._hWnd
                 placement = win32gui.GetWindowPlacement(hwnd) if IS_WINDOWS else (0, 1, 0, 0, (0, 0, 800, 600))
@@ -966,7 +1226,7 @@ class WorkspaceManagerApp:
             return
         self.ordering_in_progress = True
         self.cancel_ordering = False
-        self.order_button.config(text="⏹ Stop / Cancel", bg="#c0392b")
+        self.order_button.config(text="⏹ Stop / Cancel", bg="#dc2626")
 
         if self.auto_close_job:
             self.root.after_cancel(self.auto_close_job)
@@ -984,7 +1244,7 @@ class WorkspaceManagerApp:
             running_cache = get_running_process_paths()
             started_any = False
 
-            # Phase 1: Launch any processes that are not currently running
+            # Phase 1: Launch missing apps
             for key, state in list(self.window_states.items()):
                 if self.cancel_ordering:
                     break
@@ -999,10 +1259,10 @@ class WorkspaceManagerApp:
                         self.log(f"Failed to start '{state.process_name}': {e}", tag="error")
 
             if started_any:
-                self.log("Waiting for started applications to initialize...", tag="info")
+                self.log("Waiting for launched applications to open...", tag="info")
                 time.sleep(2.0)
 
-            # Phase 2: Poll and reposition windows
+            # Phase 2: Poll and reposition
             max_wait = 25
             waited = 0
             processed_keys = set()
@@ -1070,13 +1330,12 @@ class WorkspaceManagerApp:
             self.root.after(0, self._on_ordering_finished)
 
     def _on_ordering_finished(self):
-        self.order_button.config(text="🚀 Start, Resize & Order", bg="#27ae60")
+        self.order_button.config(text="🚀 Start, Resize & Order", bg="#059669")
         self.refresh_window_list()
 
-        # Handle auto-close
         if self.auto_close_var.get() and not self.cancel_ordering:
             self.log("Auto-close is enabled. Exiting in 5 seconds... (Click 'Stop' to cancel)", tag="info")
-            self.order_button.config(text="Cancel Auto-Close", bg="#e67e22", command=self.cancel_auto_close)
+            self.order_button.config(text="Cancel Auto-Close", bg="#d97706", command=self.cancel_auto_close)
             self.auto_close_job = self.root.after(5000, self.root.destroy)
 
     def cancel_auto_close(self):
@@ -1084,7 +1343,7 @@ class WorkspaceManagerApp:
             self.root.after_cancel(self.auto_close_job)
             self.auto_close_job = None
             self.log("Auto-close cancelled.", tag="info")
-            self.order_button.config(text="🚀 Start, Resize & Order", bg="#27ae60", command=self.toggle_stream_order)
+            self.order_button.config(text="🚀 Start, Resize & Order", bg="#059669", command=self.toggle_stream_order)
 
     def launch_independent(self, path):
         """Launches an independent process cleanly."""
@@ -1217,7 +1476,6 @@ def main():
         return
 
     root = tk.Tk()
-    root.geometry("640x520")
     app = WorkspaceManagerApp(root, initial_preset=args.preset)
     root.mainloop()
 

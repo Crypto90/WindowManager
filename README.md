@@ -40,7 +40,7 @@ End-users do **not** need Python installed. Standalone Windows binaries are auto
 
 | Version | Asset | Direct Download | Platform |
 | :---: | :---: | :---: | :---: |
-| **v0.2.1** *(Latest)* | `Crypto90s_WorkspaceManager.exe` | [**⬇️ Download v0.2.1 Executable**](https://github.com/Crypto90/WindowManager/releases/download/0.2.1/Crypto90s_WorkspaceManager.exe) | Windows 10 / 11 (64-bit) |
+| **v0.2.2** *(Latest)* | `Crypto90s_WorkspaceManager.exe` | [**⬇️ Download v0.2.2 Executable**](https://github.com/Crypto90/WindowManager/releases/download/0.2.2/Crypto90s_WorkspaceManager.exe) | Windows 10 / 11 (64-bit) |
 
 > 📁 Check all versions and release notes in [GitHub Releases](https://github.com/Crypto90/WindowManager/releases).
 
