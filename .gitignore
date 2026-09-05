@@ -1,0 +1,24 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# PyInstaller / Build output
+build/
+dist/
+*.spec
+
+# WindowManager state and config files
+window_states_*.pkl
+window_states_*.json
+window_manager_config.json
+
+# Environment / IDE
+.venv/
+venv/
+ENV/
+.vscode/
+.idea/
+.DS_Store
+*.log
