@@ -9,7 +9,10 @@ build/
 dist/
 *.spec
 
-# WindowManager state and config files
+# Workspace Manager state and config files
+workspace_states_*.json
+workspace_states_*.pkl
+workspace_manager_config.json
 window_states_*.pkl
 window_states_*.json
 window_manager_config.json

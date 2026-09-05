@@ -10,6 +10,7 @@ import sys
 import argparse
 import threading
 import datetime
+import shutil
 
 # High-DPI and Windows-specific imports
 IS_WINDOWS = sys.platform == "win32"
@@ -30,7 +31,7 @@ else:
     get_monitors = lambda: []
     PyGetWindowException = Exception
 
-current_version = "v0.2.0"
+current_version = "v0.2.1"
 
 
 def enable_high_dpi():
@@ -49,13 +50,16 @@ def enable_high_dpi():
 
 
 def get_data_dir():
-    """Returns a reliable, writable directory for presets and config."""
+    """
+    Returns a reliable, writable directory for presets and config.
+    Automatically migrates data from legacy WindowManager directories if present.
+    """
     if getattr(sys, "frozen", False):
         base_dir = os.path.dirname(sys.executable)
     else:
         base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Test if the directory is writable
+    # Test if the directory is writable (portable mode)
     test_path = os.path.join(base_dir, ".wm_write_test")
     try:
         with open(test_path, "w") as f:
@@ -63,20 +67,35 @@ def get_data_dir():
         os.remove(test_path)
         return base_dir
     except (PermissionError, OSError):
-        # Fallback to %LOCALAPPDATA%\Crypto90s_WindowManager
+        # Fallback to %LOCALAPPDATA%\Crypto90s_WorkspaceManager
         appdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-        target_dir = os.path.join(appdata, "Crypto90s_WindowManager")
+        target_dir = os.path.join(appdata, "Crypto90s_WorkspaceManager")
+        legacy_dir = os.path.join(appdata, "Crypto90s_WindowManager")
+
         os.makedirs(target_dir, exist_ok=True)
+
+        # Migrate presets from legacy directory if needed
+        if os.path.isdir(legacy_dir) and not os.listdir(target_dir):
+            try:
+                for item in os.listdir(legacy_dir):
+                    s = os.path.join(legacy_dir, item)
+                    d = os.path.join(target_dir, item)
+                    if os.path.isfile(s):
+                        shutil.copy2(s, d)
+                print("Info: Migrated preset files from legacy WindowManager directory.")
+            except Exception as e:
+                print(f"Warning: Could not copy legacy presets: {e}")
+
         return target_dir
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Crypto90's WindowManager Preset Selector")
+    parser = argparse.ArgumentParser(description="Crypto90's Workspace Manager Preset Selector")
     parser.add_argument("--preset", type=int, default=1, choices=range(1, 11),
                         help="Preset number to load (1-10, default: 1)")
     parser.add_argument("--silent", "--headless", action="store_true", dest="silent",
                         help="Run ordering in background without opening the GUI")
-    parser.add_argument("--version", action="version", version=f"Crypto90's WindowManager {current_version}")
+    parser.add_argument("--version", action="version", version=f"Crypto90's Workspace Manager {current_version}")
     return parser.parse_args()
 
 
@@ -132,73 +151,82 @@ class WindowState:
         )
 
 
-def get_preset_filepath(preset_number, ext=".json"):
+def get_preset_filepath(preset_number, ext=".json", prefix="workspace_states_"):
     data_dir = get_data_dir()
-    return os.path.join(data_dir, f"window_states_{preset_number}{ext}")
+    return os.path.join(data_dir, f"{prefix}{preset_number}{ext}")
 
 
 def load_window_states(preset_number=1):
     """
     Loads window states for a preset.
-    Prefers JSON, with automatic migration from legacy .pkl files.
+    Checks workspace_states_{n}.json first, then falls back to legacy window_states_{n} files.
     """
-    json_path = get_preset_filepath(preset_number, ".json")
-    pkl_path = get_preset_filepath(preset_number, ".pkl")
+    # Candidate paths in order of preference
+    candidates = [
+        get_preset_filepath(preset_number, ".json", "workspace_states_"),
+        get_preset_filepath(preset_number, ".json", "window_states_"),
+        get_preset_filepath(preset_number, ".pkl", "workspace_states_"),
+        get_preset_filepath(preset_number, ".pkl", "window_states_"),
+    ]
 
-    # 1. Try loading modern JSON format
-    if os.path.isfile(json_path):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                raw_states = data.get("window_states", {})
-                config = data.get("config", {})
-                window_states = {}
-                for k, v in raw_states.items():
-                    state_obj = WindowState.from_dict(v)
-                    if state_obj:
-                        window_states[k] = state_obj
-                return window_states, config
-        except Exception as e:
-            print(f"Warning: Failed to load JSON preset {preset_number}: {e}")
+    for path in candidates:
+        if not os.path.isfile(path):
+            continue
 
-    # 2. Fallback to legacy pickle format and auto-migrate
-    if os.path.isfile(pkl_path):
-        try:
-            with open(pkl_path, "rb") as f:
-                data = pickle.load(f)
-            if isinstance(data, dict):
-                raw_states = data.get("window_states", {})
-                config = data.get("config", {})
-                if not raw_states and not config:
-                    raw_states = data  # Very old pickle format was just dict of states
-                
-                window_states = {}
-                for k, v in raw_states.items():
-                    if isinstance(v, WindowState):
-                        window_states[k] = v
-                    elif isinstance(v, dict):
+        # JSON loader
+        if path.endswith(".json"):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    raw_states = data.get("window_states", {}) or data.get("workspace_states", {})
+                    config = data.get("config", {})
+                    window_states = {}
+                    for k, v in raw_states.items():
                         state_obj = WindowState.from_dict(v)
                         if state_obj:
                             window_states[k] = state_obj
-                    elif hasattr(v, "__dict__"):
-                        state_obj = WindowState.from_dict(v.__dict__)
-                        if state_obj:
-                            window_states[k] = state_obj
+                    return window_states, config
+            except Exception as e:
+                print(f"Warning: Failed to load JSON preset from {path}: {e}")
 
-                # Auto-migrate to JSON
-                save_window_states(window_states, config, preset_number)
-                print(f"Info: Migrated preset {preset_number} from PKL to JSON format.")
-                return window_states, config
-        except Exception as e:
-            print(f"Warning: Failed to load legacy PKL preset {preset_number}: {e}")
+        # Legacy PKL loader and auto-migrator
+        elif path.endswith(".pkl"):
+            try:
+                with open(path, "rb") as f:
+                    data = pickle.load(f)
+                if isinstance(data, dict):
+                    raw_states = data.get("window_states", {}) or data.get("workspace_states", {})
+                    config = data.get("config", {})
+                    if not raw_states and not config:
+                        raw_states = data
+                    
+                    window_states = {}
+                    for k, v in raw_states.items():
+                        if isinstance(v, WindowState):
+                            window_states[k] = v
+                        elif isinstance(v, dict):
+                            state_obj = WindowState.from_dict(v)
+                            if state_obj:
+                                window_states[k] = state_obj
+                        elif hasattr(v, "__dict__"):
+                            state_obj = WindowState.from_dict(v.__dict__)
+                            if state_obj:
+                                window_states[k] = state_obj
+
+                    # Save to new workspace_states format
+                    save_window_states(window_states, config, preset_number)
+                    print(f"Info: Migrated preset {preset_number} from legacy PKL to JSON format.")
+                    return window_states, config
+            except Exception as e:
+                print(f"Warning: Failed to load PKL preset from {path}: {e}")
 
     return {}, {}
 
 
 def save_window_states(window_states, config=None, preset_number=1):
     """Saves window states and configuration to a clean JSON file."""
-    json_path = get_preset_filepath(preset_number, ".json")
+    json_path = get_preset_filepath(preset_number, ".json", "workspace_states_")
     serialized_states = {}
     for k, v in window_states.items():
         if isinstance(v, WindowState):
@@ -208,7 +236,8 @@ def save_window_states(window_states, config=None, preset_number=1):
 
     data = {
         "version": current_version,
-        "window_states": serialized_states,
+        "workspace_states": serialized_states,
+        "window_states": serialized_states,  # Dual-key for seamless compatibility
         "config": config or {}
     }
 
@@ -287,7 +316,7 @@ def is_process_running(process_path, running_cache=None):
 def get_visible_windows_grouped_by_monitor():
     """
     Groups open application windows by monitor.
-    Filters out shell/desktop windows and WindowManager itself, while preserving File Explorer.
+    Filters out shell/desktop windows and Workspace Manager itself, while preserving File Explorer.
     """
     if not IS_WINDOWS:
         return {}
@@ -303,7 +332,7 @@ def get_visible_windows_grouped_by_monitor():
         if not process_name:
             continue
 
-        # Exclude WindowManager itself
+        # Exclude Workspace Manager itself
         if pid == current_pid:
             continue
 
@@ -381,22 +410,27 @@ def get_uwp_app_info(path):
 
 
 def is_start_with_windows_enabled():
-    """Checks if WindowManager is configured to run at Windows startup."""
+    """Checks if Workspace Manager is configured to run at Windows startup."""
     if not IS_WINDOWS:
         return False
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, winreg.KEY_READ)
-        val, _ = winreg.QueryValueEx(key, "Crypto90s_WindowManager")
+        val = None
+        for k in ("Crypto90s_WorkspaceManager", "Crypto90s_WindowManager"):
+            try:
+                val, _ = winreg.QueryValueEx(key, k)
+                if val:
+                    break
+            except FileNotFoundError:
+                continue
         winreg.CloseKey(key)
         return bool(val)
-    except FileNotFoundError:
-        return False
     except Exception:
         return False
 
 
 def set_start_with_windows(enabled, preset=1):
-    """Enables or disables WindowManager launch at Windows startup."""
+    """Enables or disables Workspace Manager launch at Windows startup."""
     if not IS_WINDOWS:
         return False
     try:
@@ -406,12 +440,18 @@ def set_start_with_windows(enabled, preset=1):
                 exe_cmd = f'"{sys.executable}" --preset {preset} --silent'
             else:
                 exe_cmd = f'"{sys.executable}" "{os.path.abspath(__file__)}" --preset {preset} --silent'
-            winreg.SetValueEx(key, "Crypto90s_WindowManager", 0, winreg.REG_SZ, exe_cmd)
-        else:
+            winreg.SetValueEx(key, "Crypto90s_WorkspaceManager", 0, winreg.REG_SZ, exe_cmd)
+            # Remove legacy key if it existed
             try:
                 winreg.DeleteValue(key, "Crypto90s_WindowManager")
             except FileNotFoundError:
                 pass
+        else:
+            for k in ("Crypto90s_WorkspaceManager", "Crypto90s_WindowManager"):
+                try:
+                    winreg.DeleteValue(key, k)
+                except FileNotFoundError:
+                    pass
         winreg.CloseKey(key)
         return True
     except Exception as e:
@@ -419,10 +459,10 @@ def set_start_with_windows(enabled, preset=1):
         return False
 
 
-class WindowManagerApp:
+class WorkspaceManagerApp:
     def __init__(self, root, initial_preset=1):
         self.root = root
-        self.root.title("Crypto90's WindowManager")
+        self.root.title("Crypto90's Workspace Manager")
         self.current_preset_num = initial_preset
 
         self.window_states, self.config = load_window_states(self.current_preset_num)
@@ -545,7 +585,7 @@ class WindowManagerApp:
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.log_text_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Pre-configure log color tags (Fixes dark-blue unreadability bug)
+        # Pre-configure log color tags
         self.log_text.tag_config("error", foreground="#e74c3c")    # Bright Red
         self.log_text.tag_config("info", foreground="#3498db")     # Vibrant Cyan / Blue
         self.log_text.tag_config("success", foreground="#2ecc71")  # Bright Green
@@ -564,7 +604,7 @@ class WindowManagerApp:
 
         # Initial Welcome Log
         self.log("------------------------------------------------", tag="info")
-        self.log(f"Crypto90's WindowManager {current_version} Initialized", tag="success")
+        self.log(f"Crypto90's Workspace Manager {current_version} Initialized", tag="success")
         self.log(f"Storage: {get_data_dir()}", tag="info")
         self.log("------------------------------------------------", tag="info")
 
@@ -777,7 +817,6 @@ class WindowManagerApp:
                 self.process_listbox.insert(tk.END, label)
                 idx = self.process_listbox.size() - 1
                 self.process_listbox.itemconfig(idx, {'fg': '#e74c3c'})  # Red
-                # Store entry so offline apps are never deleted on save
                 self.window_mapping.append((key, None, state.process_name, state.process_path))
 
         # 2. Render Currently Open Windows grouped by Monitor
@@ -831,37 +870,32 @@ class WindowManagerApp:
                 self.window_mapping.append((key, win, pname, ppath))
 
     def save_window_positions(self):
-        """
-        Saves selected window positions.
-        CRITICAL BUG FIX: Preserves offline/closed applications in the preset!
-        """
+        """Saves selected window positions while preserving offline apps."""
         selected_indices = self.process_listbox.curselection()
         if not selected_indices:
             self.log("No windows selected to save.", tag="warn")
             return
 
-        # Load previous states to preserve offline apps and overrides
         previous_states, _ = load_window_states(self.current_preset_num)
         new_window_states = {}
 
-        # Preserve any offline windows that were previously saved and are selected
         for idx in selected_indices:
             if idx >= len(self.window_mapping):
                 continue
             entry = self.window_mapping[idx]
             if not entry:
-                continue  # Skip monitor headers
+                continue
 
             state_key, win, pname, ppath = entry
 
-            # Case A: Offline / non-running window was selected -> Preserve from previous states
+            # Offline / non-running window was selected -> Preserve from previous states
             if win is None:
                 if state_key in previous_states:
                     new_window_states[state_key] = previous_states[state_key]
                     self.log(f"Preserved offline app: {pname}", tag="info")
                 continue
 
-            # Case B: Currently open window
+            # Currently open window
             try:
                 hwnd = win._hWnd
                 placement = win32gui.GetWindowPlacement(hwnd) if IS_WINDOWS else (0, 1, 0, 0, (0, 0, 800, 600))
@@ -880,7 +914,6 @@ class WindowManagerApp:
                     width = win.width
                     height = win.height
 
-                # Preserve launcher override if previously defined
                 launcher_override = None
                 if state_key in previous_states:
                     launcher_override = previous_states[state_key].launcher_override
@@ -935,7 +968,6 @@ class WindowManagerApp:
         self.cancel_ordering = False
         self.order_button.config(text="⏹ Stop / Cancel", bg="#c0392b")
 
-        # Cancel any pending auto-close timer if re-running
         if self.auto_close_job:
             self.root.after_cancel(self.auto_close_job)
             self.auto_close_job = None
@@ -984,12 +1016,10 @@ class WindowManagerApp:
                     if key == "main_window" or key in processed_keys or self.cancel_ordering:
                         continue
 
-                    # Search for matching window
                     matched_win = None
                     for w in gw.getAllWindows():
                         pname, ppath, _ = get_process_info_for_window(w)
                         if pname == state.process_name:
-                            # If title is saved, try to match title; otherwise match process
                             if state.window_title and state.window_title in w.title:
                                 matched_win = w
                                 break
@@ -999,7 +1029,6 @@ class WindowManagerApp:
                     if matched_win:
                         hwnd = matched_win._hWnd
                         try:
-                            # Unmaximize/restore before moving
                             placement = win32gui.GetWindowPlacement(hwnd)
                             if placement[1] in (win32con.SW_SHOWMINIMIZED, win32con.SW_SHOWMAXIMIZED):
                                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -1007,7 +1036,6 @@ class WindowManagerApp:
                             matched_win.moveTo(*state.position)
                             matched_win.resizeTo(*state.size)
 
-                            # Re-apply maximized or minimized state
                             if state.maximized:
                                 win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
                             elif state.minimized:
@@ -1070,7 +1098,7 @@ class WindowManagerApp:
                 shell=False
             )
         except OSError as e:
-            if hasattr(e, 'winerror') and e.winerror == 740:  # Elevation required
+            if hasattr(e, 'winerror') and e.winerror == 740:
                 self.log(f"Elevation required for {os.path.basename(path)}. Launching via ShellExecute...", tag="warn")
                 if IS_WINDOWS:
                     ctypes.windll.shell32.ShellExecuteW(None, "open", path, None, None, 1)
@@ -1078,10 +1106,7 @@ class WindowManagerApp:
                 raise
 
     def try_start_application(self, state):
-        """
-        Starts an application.
-        CRITICAL BUG FIX: Fixes undefined 'app_path', stops runaway root walks, handles UWP correctly.
-        """
+        """Starts an application, resolving UWP or relocated executables."""
         pname = state.process_name
         launcher_path = state.launcher_override or state.process_path
         if not launcher_path:
@@ -1110,16 +1135,13 @@ class WindowManagerApp:
             self.log(f"Started: {launcher_path}", tag="success")
             return
 
-        # 3. Fallback: Search for relocated executable (e.g. app update)
-        # SAFEGUARD: Never walk root drive C:\ or deep directory trees
+        # 3. Fallback: Search for relocated executable
         base_dir = os.path.dirname(launcher_path)
         filename = os.path.basename(launcher_path)
         parent_dir = os.path.dirname(base_dir)
 
-        # Ensure parent_dir is not root or empty (e.g., 'C:\\')
         if parent_dir and len(parent_dir.strip(":/\\")) > 1 and os.path.isdir(parent_dir):
             for root, dirs, files in os.walk(parent_dir):
-                # Restrict search depth to 2 levels
                 rel = os.path.relpath(root, parent_dir)
                 if rel.count(os.sep) > 2:
                     continue
@@ -1127,7 +1149,6 @@ class WindowManagerApp:
                     new_path = os.path.join(root, filename)
                     if os.path.isfile(new_path):
                         self.log(f"Detected updated path for {pname}: {new_path}", tag="info")
-                        # Update state in memory
                         state.process_path = new_path
                         save_window_states(self.window_states, self.config, self.current_preset_num)
                         self.launch_independent(new_path)
@@ -1138,7 +1159,7 @@ class WindowManagerApp:
 
 def run_headless(preset_number=1):
     """Headless CLI mode: orders windows silently in background without GUI."""
-    print(f"Crypto90's WindowManager {current_version} [Headless Mode]")
+    print(f"Crypto90's Workspace Manager {current_version} [Headless Mode]")
     states, config = load_window_states(preset_number)
     if not states:
         print(f"No window states found for Preset {preset_number}. Exiting.")
@@ -1184,7 +1205,7 @@ def run_headless(preset_number=1):
             break
         time.sleep(1.0)
         waited += 1
-    print("Headless window ordering complete.")
+    print("Headless workspace ordering complete.")
 
 
 def main():
@@ -1197,7 +1218,7 @@ def main():
 
     root = tk.Tk()
     root.geometry("640x520")
-    app = WindowManagerApp(root, initial_preset=args.preset)
+    app = WorkspaceManagerApp(root, initial_preset=args.preset)
     root.mainloop()
 
 

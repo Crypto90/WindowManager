@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="./banner.png" alt="Crypto90's WindowManager Banner" width="100%" style="border-radius: 12px; margin-bottom: 20px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);" />
+<img src="./banner.png" alt="Crypto90's Workspace Manager Banner" width="100%" style="border-radius: 12px; margin-bottom: 20px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);" />
 
-# 🖥️ Crypto90's WindowManager
+# 🖥️ Crypto90's Workspace Manager
 
 **Intelligent, multi-monitor window management and workspace restoration for Windows.**
 
@@ -28,9 +28,9 @@
 
 ## 💡 Overview
 
-**Crypto90's WindowManager** solves a universal workspace frustration: every time your PC reboots, monitors wake from sleep, or applications update, your windows scatter across screens.
+**Crypto90's Workspace Manager** solves a universal workspace frustration: every time your PC reboots, monitors wake from sleep, or applications update, your windows scatter across screens.
 
-With WindowManager, your ideal desktop layout is saved into distinct presets (up to 10). When triggered—either automatically on system boot or with a single click—it scans all connected displays, ensures missing applications are automatically started, and smoothly arranges every window into its exact coordinate, dimension, and state (including true maximized windows).
+With Workspace Manager, your ideal desktop layouts are saved into distinct presets (up to 10). When triggered—either automatically on system boot or with a single click—it scans all connected displays, ensures missing applications are automatically started, and smoothly arranges every window into its exact coordinates, dimensions, and state (including true maximized windows).
 
 ---
 
@@ -40,7 +40,7 @@ End-users do **not** need Python installed. Standalone Windows binaries are auto
 
 | Version | Asset | Direct Download | Platform |
 | :---: | :---: | :---: | :---: |
-| **v0.2.0** *(Latest)* | `Crypto90s_WindowManager.exe` | [**⬇️ Download v0.2.0 Executable**](https://github.com/Crypto90/WindowManager/releases/download/0.2.0/Crypto90s_WindowManager.exe) | Windows 10 / 11 (64-bit) |
+| **v0.2.1** *(Latest)* | `Crypto90s_WorkspaceManager.exe` | [**⬇️ Download v0.2.1 Executable**](https://github.com/Crypto90/WindowManager/releases/download/0.2.1/Crypto90s_WorkspaceManager.exe) | Windows 10 / 11 (64-bit) |
 
 > 📁 Check all versions and release notes in [GitHub Releases](https://github.com/Crypto90/WindowManager/releases).
 
@@ -72,7 +72,7 @@ End-users do **not** need Python installed. Standalone Windows binaries are auto
   <tr>
     <td width="50%">
       <h3>💾 Safe JSON Storage</h3>
-      Human-readable, easily editable <code>window_states_X.json</code> format. Includes automatic, lossless migration from legacy <code>.pkl</code> files.
+      Human-readable, easily editable <code>workspace_states_X.json</code> format. Includes automatic, lossless migration from legacy WindowManager presets.
     </td>
     <td width="50%">
       <h3>🏷️ Custom Preset Renaming</h3>
@@ -96,27 +96,27 @@ End-users do **not** need Python installed. Standalone Windows binaries are auto
 ## 📸 Screenshot
 
 <div align="center">
-  <img src="./preview.png" alt="WindowManager Application Interface" width="750px" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);" />
+  <img src="./preview.png" alt="Workspace Manager Application Interface" width="750px" style="border-radius: 8px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);" />
 </div>
 
 ---
 
 ## ⌨️ Command Line Options
 
-WindowManager includes a flexible command-line interface for automation and shortcuts:
+Workspace Manager includes a flexible command-line interface for automation and shortcuts:
 
 ```bash
 # Launch GUI and load a specific preset (1-10)
-python Crypto90s_WindowManager.py --preset 2
+python Crypto90s_WorkspaceManager.py --preset 2
 
 # Headless / Silent Execution (arranges windows in background and exits without GUI)
-python Crypto90s_WindowManager.py --preset 1 --silent
+python Crypto90s_WorkspaceManager.py --preset 1 --silent
 
 # Display version information
-python Crypto90s_WindowManager.py --version
+python Crypto90s_WorkspaceManager.py --version
 
 # View all command line options
-python Crypto90s_WindowManager.py --help
+python Crypto90s_WorkspaceManager.py --help
 ```
 
 ### CLI Parameter Reference
@@ -134,11 +134,11 @@ python Crypto90s_WindowManager.py --help
 
 ```mermaid
 flowchart TD
-    A["Launch WindowManager"] --> B{"Check CLI Mode"}
+    A["Launch Workspace Manager"] --> B{"Check CLI Mode"}
     B -->|--silent| C["Run Headless Worker"]
     B -->|Normal| D["Open GUI & Mount Controls"]
     
-    D --> E["Load Preset (JSON / PKL Auto-Migration)"]
+    D --> E["Load Preset (JSON / Legacy Auto-Migration)"]
     E --> F["Snapshot Running Processes & Displays"]
     F --> G["Render Window Mapping List"]
     
@@ -175,7 +175,7 @@ pip install -r requirements.txt
 ### 2. Run Locally
 
 ```bash
-python Crypto90s_WindowManager.py
+python Crypto90s_WorkspaceManager.py
 ```
 
 ### 3. Build Standalone Executable
@@ -187,11 +187,11 @@ Double-click `build_exe.bat` in the repository root.
 
 **Option B (Manual Command):**
 ```bash
-pyinstaller --onefile --noconsole --name "Crypto90s_WindowManager" Crypto90s_WindowManager.py
+pyinstaller --onefile --noconsole --name "Crypto90s_WorkspaceManager" Crypto90s_WorkspaceManager.py
 ```
 The compiled binary will be located in the `dist/` directory:
 ```
-dist/Crypto90s_WindowManager.exe
+dist/Crypto90s_WorkspaceManager.exe
 ```
 
 ---
@@ -199,14 +199,14 @@ dist/Crypto90s_WindowManager.exe
 ## 📁 Configuration & Preset Storage
 
 Preset configurations are stored as clean, structured JSON files:
-- Portable location: Next to the executable/script if writable (`window_states_1.json`, etc.).
-- System fallback: `%LOCALAPPDATA%\Crypto90s_WindowManager\` if running from a protected directory.
+- Portable location: Next to the executable/script if writable (`workspace_states_1.json`, etc.).
+- System fallback: `%LOCALAPPDATA%\Crypto90s_WorkspaceManager\` if running from a protected directory.
 
-### Sample Preset Entry (`window_states_1.json`):
+### Sample Preset Entry (`workspace_states_1.json`):
 ```json
 {
-  "version": "v0.2.0",
-  "window_states": {
+  "version": "v0.2.1",
+  "workspace_states": {
     "chrome.exe": {
       "process_name": "chrome.exe",
       "window_title": "GitHub - Crypto90/WindowManager",
@@ -244,7 +244,7 @@ Contributions, issues, and feature requests are welcome!
 
 ## ☕ Support the Developer
 
-If Crypto90's WindowManager saves you time and organizes your daily workspace, consider supporting the project:
+If Crypto90's Workspace Manager saves you time and organizes your daily workspace, consider supporting the project:
 
 <div align="center">
 
